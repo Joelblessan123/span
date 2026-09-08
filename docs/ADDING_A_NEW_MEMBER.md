@@ -49,7 +49,7 @@ So the flow is: **form submit → create\_member RPC → insert into members →
   - If not, it creates a new Auth user (Supabase `auth.admin.createUser`) with a generated temporary password and sets `email_confirm: true` so they can log in right away.  
   - It updates the **`members`** row to set **`user_id`** to the Auth user’s id.  
   - Optionally it sets up **Cloudflare Email Routing** so the member’s @spanationwide.org address can forward to their personal email (original\_email).  
-  - It sends a **welcome email** via **Resend** to the member (to their personal email if available, otherwise the org email). The email includes the temporary password and a link to the login page so they can sign in and complete registration.
+  - It sends a **welcome email** via **Resend** to the member (to their personal email if available, otherwise the org email). The email includes the temporary password and a link to the login page so they can sign in and complete registration. **Login itself uses the SPAN org email** (`members.email` / `@spanationwide.org`), not the personal address.
 
 **Consistency:** New members are created with `registration_complete = false` so the first-login registration gate always runs for this path.
 

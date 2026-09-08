@@ -5,15 +5,37 @@ What happens when a **new member** logs in for the first time (e.g. with the tem
 
 ## 1\. Logging in
 
-**What happens:** The new member goes to the **login page** (`login.html`), enters the email they were given (often their @spanationwide.org address) and the **temporary password** from the welcome email. If they type only the local part (e.g. `firstname.lastname`), the app can auto-append `@spanationwide.org`. On success, they are redirected to **`/dashboard.html`**.
+**What happens:** The new member goes to the **login page** (`login.html`), enters their **SPAN email** (`…@spanationwide.org`) and the **temporary password** from the welcome email. If they type only the local part (e.g. `firstname.lastname`), the app auto-appends `@spanationwide.org`. On success, they are redirected to **`/dashboard.html`**.
 
-If they arrived via a **password reset link** (e.g. from the Edge Function recovery flow), the URL may contain a hash; the login page handles that and can show a “set new password” form or redirect to dashboard once the session is established. For a brand‑new member using the temp password, the normal path is email \+ password → redirect to dashboard.
+**Important:** Auth login is always the SPAN address on `members.email`, not `original_email` (personal). Personal email is for delivery of welcome/reset messages only. The login form labels this and warns if someone tries a non-SPAN address.
+
+If they arrived via a **password recovery hash** in the URL, the login page can show a “set new password” form once the session is established. For a brand‑new member using the temp password, the normal path is email \+ password → redirect to dashboard.
 
 **Where it lives:**
 
 - **Page:** **`src/pages/LoginPage.jsx`**. It uses `supabase.auth.signInWithPassword({ email, password })`. On success it sets `window.location.href = '/dashboard.html'`. If the user already has a session when the page loads (e.g. they’re already logged in), it redirects to the dashboard immediately so they can’t “get stuck” on the login page.
 
 **Note:** Login does not read `registration_complete`; `DashboardPage` branches on that flag after loading the member row.  
+---
+
+## 1b\. Forgot password (temporary password reset)
+
+**What happens:** On the login page, **Forgot Password?** opens a modal. The member can enter their **SPAN or personal** email. The frontend POSTs to the password-reset Edge Function (see deploy name below). The function:
+
+1. Looks up **`members`** by `email` or `original_email` (case-insensitive).
+2. Resolves the Auth user preferentially by **SPAN login email** (`members.email`), then by `members.user_id`, then creates/links an Auth user if the member row exists but Auth does not.
+3. Sets an **alphanumeric** temporary password on that Auth user (special characters were avoided because HTML email clients can mangle `&` etc. when copying).
+4. Syncs Auth email to the SPAN address when mismatched, and re-links `members.user_id` to the account that was reset.
+5. Emails the temp password via **Resend** to **`original_email`** when present, otherwise to the SPAN email. The email body shows the **exact SPAN login email** to use at login.
+
+**Where it lives:**
+
+- **UI:** `src/pages/LoginPage.jsx` → `fetch(`${VITE_SUPABASE_URL}/functions/v1/hyper-endpoint`, …)` with `{ email }`.
+- **Source:** `supabase/functions/password-reset/index.ts`.
+- **Deploy name:** production is historically deployed as **`hyper-endpoint`** (legacy function name). Redeploy with that name so login keeps working; renaming the local folder alone does not rename the live function. See **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+
+**Support tip:** If someone says “temp password doesn’t work,” confirm they are logging in with **`@spanationwide.org`**, not the personal inbox that received the email.
+
 ---
 
 ## 2\. Dashboard: registration gate
@@ -64,7 +86,8 @@ When they submit:
 
 | Step | Who  | What |
 | :---- | :---- | :---- |
-| 1 | New member | Opens login page, enters email \+ temp password from welcome email. |
+| 1 | New member | Opens login page, enters **SPAN** email \+ temp password from welcome email. |
+| 1b | Existing member (optional) | Forgot Password → personal or SPAN email → temp password emailed; still logs in with SPAN email. |
 | 2 | Login page | `signInWithPassword` → success → redirect to `/dashboard.html`. |
 | 3 | Dashboard | Loads, gets session, fetches member by `user_id`/email. If no session → redirect to login. |
 | 4 | Dashboard | If `member.registration_complete === false` → render only **RegistrationForm**. |

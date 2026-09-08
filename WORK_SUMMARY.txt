@@ -75,6 +75,8 @@ APPLICATIONS
   (detailed welcome is intended for the live call).
 - Rejection flow can send email via send-rejection-email; met_with date captured in UI.
 - Import from application into Add Member prefills member fields.
+- AI screening: DivEye / ScreenComply checks on application “additional info” and proposals
+  to help flag low-quality or AI-generated text before human review.
 
 VOLUNTEER HOURS
 - Members submit hours; volunteer-permission users can approve/deny and comment.
@@ -85,27 +87,55 @@ MEMBERS & AUTH
 - Member create/update via dashboard; members-provision Edge Function ties Auth user,
   email, welcome messaging (Resend in current setup — see function and docs/SETUP.md).
 - Registration form on first login; start_date can be set when registration completes.
-- Password reset and related flows via dedicated Edge Functions where applicable.
+- Login identity is members.email (@spanationwide.org). original_email is personal/contact
+  only (welcome + password-reset delivery).
+- Forgot Password: LoginPage POSTs to /functions/v1/hyper-endpoint (source folder
+  password-reset/). Resolves members by SPAN or personal email; prefers Auth user for
+  SPAN email; may create/link Auth if missing; sets alphanumeric temp password; emails
+  via Resend with explicit SPAN login address in the body. Details:
+  docs/FIRST_LOGIN_AND_REGISTRATION.md §1b and docs/DEPLOYMENT.md.
+- Exec membership lifecycle: honorable-exit / firing letter flows, directory deactivation
+  (active = false) after confirmed exit, HR report review notes, policy notice emails.
+
+LEAVE, CALENDAR & DASHBOARD UX
+- Leave/extension requests (member_requests) with exec approve/decline.
+- Unified leave calendar: birthdays, SPAN events, team-lead deadlines
+  (dashboard_calendar_events + related UI).
+- Dashboard dark mode, section jump nav, self-serve school/grade/location edits where enabled.
+
+CLASSROOM (SPAN Classroom)
+- Phase 1–2: schools, teachers, classes, join flow; assignments with materials/file uploads,
+  grading, editing; classroom LegiScan search and student policy toolkit.
+- Extends the platform beyond internal member ops into education workflows.
+
+SECURITY / PERF (RECENT)
+- Public site reads increasingly routed through safe RPCs; hardened public RLS.
+- Bundle/perf work: dashboard JS cuts, WebP, public-data caching, a11y passes;
+  Our Story and related page splits to reduce bloat.
 
 MEDIUM / BLOG
 - blog permission gates a Medium OTP section on the dashboard; medium-otp-arm Edge Function
   and optional Google Apps Script for forwarding login codes to the member’s SPAN email.
 
 EDGE FUNCTIONS (DEPLOY ALL THAT YOU USE)
-- members-provision, password-reset, dashboard-view (as view-member-dashboard),
-  send-rejection-email, send-invitation-email, send-onboarding-schedule-email,
-  send-volunteer-verification, medium-otp-arm, fetch-legiscan-person-contact (as deployed).
+- members-provision, password-reset (deploy as hyper-endpoint), dashboard-view (as
+  view-member-dashboard), send-rejection-email, send-invitation-email,
+  send-onboarding-schedule-email, send-volunteer-verification, medium-otp-arm,
+  notify-new-application, notify-hr-report, notify-resignation-request,
+  fetch-legiscan-person-contact (as deployed), plus classroom-related functions if present.
 
 DATABASE
 - All schema/RLS changes live under supabase/migrations/. Recent examples: volunteers
   reviewed_by/reviewed_at; applications referral_friend_name; bill assignment and
-  outreach tables — run migrations on Supabase before relying on new columns.
+  outreach tables; dashboard_calendar_events; classroom tables; public-read RPC hardening —
+  run migrations on Supabase before relying on new columns.
 
 DOCUMENTATION IN REPO
 - docs/README.md — index of all guides; docs/README-REACT.md, docs/README-ENV.md, docs/DEPLOYMENT.md.
 - docs/SETUP.md, docs/DEVELOPMENT.md, docs/DATABASE_ARCHITECTURE.md, docs/CODEBASE_ARCHITECTURE.md,
   docs/DASHBOARD_FUNCTIONS.md, docs/APPLYING_AND_APPLICATION_REVIEW.md, docs/DOCS_CHANGELOG.md,
-  docs/COPILOT_CONTEXT.md, and topic-specific notes (e.g. leave-and-extension-requests).
+  docs/COPILOT_CONTEXT.md, docs/FIRST_LOGIN_AND_REGISTRATION.md (incl. Forgot Password),
+  and topic-specific notes (e.g. leave-and-extension-requests).
 - docs/email-templates/ — reference HTML only; production email bodies live in Edge Functions.
 - This file (WORK_SUMMARY.txt): long-form project narrative + section 0 as current snapshot.
 

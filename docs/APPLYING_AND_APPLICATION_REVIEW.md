@@ -38,6 +38,7 @@ From the modal they can:
 - **Mark Met with:** Choose a date, then status becomes **met_with** (workflow only; no account yet).  
 - **Mark Onboard (email):** Same preview/send pattern as the invite, using **`send-onboarding-schedule-email`**: congratulates the applicant and asks for availability over the next two weeks to schedule the **onboarding call**; then status becomes **Onboard**.  
 - **Set a review score** (optional numeric value, e.g. 1, 2.5) stored as `numeric_grade`, separate from the applicant’s school grade.  
+- **AI text screening:** Dashboard can run DivEye / ScreenComply checks on application **additional info** (and related proposal checks elsewhere) to help flag low-quality or AI-generated text before human review — advisory signal, not an auto-reject.  
 - **Add or edit notes** (stored on the application) for other execs to see.  
 - **Accept:** The application is marked `accepted`, and the **Add Member** modal opens with the application’s data pre-filled so the exec can create the new member in the next step (covered in the next section).  
 - **Reject:** The application is marked `rejected`. The exec can optionally **send a rejection email** to the applicant (see below). 

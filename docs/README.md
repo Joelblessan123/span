@@ -16,7 +16,7 @@ These files describe **how SPAN is structured and how features work**. They are 
 | [DOCS_CHANGELOG.md](./DOCS_CHANGELOG.md) | Doc changes (newest first) |
 | [APPLYING_AND_APPLICATION_REVIEW.md](./APPLYING_AND_APPLICATION_REVIEW.md) | Application pipeline and emails |
 | [ADDING_A_NEW_MEMBER.md](./ADDING_A_NEW_MEMBER.md) | Member creation flow |
-| [FIRST_LOGIN_AND_REGISTRATION.md](./FIRST_LOGIN_AND_REGISTRATION.md) | First login and registration |
+| [FIRST_LOGIN_AND_REGISTRATION.md](./FIRST_LOGIN_AND_REGISTRATION.md) | First login, registration, and Forgot Password |
 | [BILLS_EXEC_SUITE_SPEC.md](./BILLS_EXEC_SUITE_SPEC.md) | Bills exec suite (assignments, research, outreach) |
 | [leave-and-extension-requests.md](./leave-and-extension-requests.md) | Leave / extension requests |
 

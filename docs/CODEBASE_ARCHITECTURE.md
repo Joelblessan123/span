@@ -100,7 +100,7 @@ All live under **`supabase/functions/`**. Each is a separate function deployed t
 | Function | Purpose |
 | :---- | :---- |
 | **members-provision** | Runs after a new member (and Auth user) is created; sends welcome email with temporary password. |
-| **password-reset** | Sends password-reset email with temp password and link. Runs when you say ‘Forgot Password?’. |
+| **password-reset** | Forgot Password flow: resolves member by SPAN or personal email, sets alphanumeric temp password on the SPAN Auth user, emails via Resend (usually to `original_email`). **Deployed in production as `hyper-endpoint`** (login page calls that URL). |
 | **dashboard-view** | Deployed as `view-member-dashboard`. GET with `member_id`; returns that member’s dashboard data. Only callable by execs (all 4 permissions). |
 | **send-rejection-email** | Sends application rejection email (Resend) |
 | **send-volunteer-verification** | Sends volunteer verification PDF to member’s email. Exec-only. |

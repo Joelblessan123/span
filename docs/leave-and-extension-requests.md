@@ -8,6 +8,7 @@
 
 - **Leave/break:** Member submits time off with a reason and optional start/end dates; execs approve or decline.
 - **Project extension:** Member submits an extension with reason and optional project name / date; execs approve or decline.
+- **Calendar (related UI):** The Leave dashboard section also surfaces a **unified calendar** (birthdays, org events, team deadlines) implemented separately from `member_requests` — see `WORK_SUMMARY.txt` §0 and leave calendar components.
 
 Roughly the same review pattern as other member-submitted items: submit → exec review → approve or decline (optional exec notes).
 

@@ -31,6 +31,17 @@ Deploy a function:
 supabase functions deploy <function-name>
 ```
 
+**Password reset (legacy deploy name):** source lives in `supabase/functions/password-reset/`, but production login calls **`/functions/v1/hyper-endpoint`**. Deploy under that name so Forgot Password keeps working:
+
+```bash
+# From repo root — if CLI expects a folder named hyper-endpoint, copy or symlink first:
+cp -R supabase/functions/password-reset supabase/functions/hyper-endpoint
+supabase functions deploy hyper-endpoint --project-ref <your-project-ref>
+# Remove the copy afterward if you prefer a single source folder
+```
+
+Same pattern as `dashboard-view` → deployed as `view-member-dashboard`.
+
 **Database webhooks** (e.g. `members` → `members-provision`): point the HTTP URL at  
 `https://<your-project-ref>.supabase.co/functions/v1/<function-name>`  
 with the **service role** bearer token as required by your setup.
@@ -77,9 +88,12 @@ Optional: `VITE_LEGISCAN_API_KEY` if you use LegiScan on the public site.
 | Symptom | Check |
 | :-- | :-- |
 | Blank or auth errors | `VITE_*` at build time; correct Supabase project |
+| Forgot Password 404 / no email | Function must be deployed as **`hyper-endpoint`** (not only `password-reset`); `RESEND_API_KEY`; member row `email` / `original_email` |
+| Temp password “doesn’t work” | Member must log in with **SPAN** `@spanationwide.org` email, not personal; redeploy latest `password-reset` source as `hyper-endpoint` |
 | Functions 401/403 | JWT verification settings, anon vs service role, caller permissions |
 | Email not sent | `RESEND_API_KEY`, from-domain verification, function logs |
 | PDFs / images 404 | Storage bucket names, public policies, path logic in app |
+| Blank white page / very slow HTML | Origin TTFB and CDN (e.g. Cloudflare Rocket Loader rewriting module scripts can break React paint for some clients) |
 
 ---
 

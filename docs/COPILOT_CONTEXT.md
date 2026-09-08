@@ -71,7 +71,7 @@ Project Overview
 **Backend (`supabase/`):**
 
 - `migrations/` \- SQL migration files (run in order, all RLS policies and functions are here)  
-- `functions/` \- Edge Functions (Deno/TypeScript): `members-provision/` (member onboarding), `password-reset/` (password reset emails), `dashboard-view/` (deployed as `view-member-dashboard`), `notify-new-application/` (Resend alert when a public application is submitted), `notify-hr-report/`, `notify-resignation-request/`, `send-rejection-email/`, `send-invitation-email/` (interview invite; Resend, `dry_run` preview), `send-onboarding-schedule-email/` (onboarding call scheduling; Resend, `dry_run` preview), `send-volunteer-verification/`, `medium-otp-arm/` (Medium OTP forwarding for blog editors), plus LegiScan contact fetch where used
+- `functions/` \- Edge Functions (Deno/TypeScript): `members-provision/` (member onboarding), `password-reset/` (**deployed as `hyper-endpoint`**; Forgot Password + temp password via Resend), `dashboard-view/` (deployed as `view-member-dashboard`), `notify-new-application/` (Resend alert when a public application is submitted), `notify-hr-report/`, `notify-resignation-request/`, `send-rejection-email/`, `send-invitation-email/` (interview invite; Resend, `dry_run` preview), `send-onboarding-schedule-email/` (onboarding call scheduling; Resend, `dry_run` preview), `send-volunteer-verification/`, `medium-otp-arm/` (Medium OTP forwarding for blog editors), plus LegiScan contact fetch where used
 
 **Exec (executive director):**
 
@@ -83,7 +83,7 @@ Project Overview
 
 - All emails are sent via **Resend**. API key stored as `RESEND_API_KEY` Supabase secret. Sending domain: `spanationwide.org`, from address: `contact@spanationwide.org`.  
 - **Onboarding email** \- Sent automatically by `members-provision` Edge Function when a new member is created. Includes welcome message, temporary password, onboarding steps, and login link. HTML template inlined in the function.  
-- **Password reset email** \- Sent by `password-reset` Edge Function. Includes temporary password and login instructions. HTML template inlined in the function.  
+- **Password reset email** \- Sent by `password-reset` (live URL **`/functions/v1/hyper-endpoint`**). Resolves `members` by SPAN `email` or `original_email`; prefers Auth user for SPAN email; alphanumeric temp password; delivery to personal email when set; email body states the SPAN address required at login. See `docs/FIRST_LOGIN_AND_REGISTRATION.md` §1b.  
 - **Send rejection email API:** `POST /functions/v1/send-rejection-email` with `Authorization: Bearer <session JWT>` and body `{ applicant_name, applicant_email }`. Caller must be an exec; otherwise 403\.  
 - **Send application invitation email API:** `POST /functions/v1/send-invitation-email` with `Authorization: Bearer <session JWT>` and body `{ applicant_name, applicant_email, dry_run?: boolean }`. If `dry_run: true`, returns `{ from, to, cc, subject, html }` for UI preview (no send). If omitted/false, sends via Resend and returns `{ ok, email_id }`. Default **from** `Joel Blessan <joel.blessan@spanationwide.org>`, **cc** `vishank.panchbhavi@spanationwide.org` (override with secrets `INVITATION_FROM`, `INVITATION_CC`).  
 - **Send onboarding scheduling email API:** `POST /functions/v1/send-onboarding-schedule-email` — same pattern (`dry_run` preview); used when marking an application **Onboard** (congrats + ask for two weeks’ availability for the onboarding call). Optional secrets `ONBOARDING_SCHEDULE_FROM` / `ONBOARDING_SCHEDULE_CC`; falls back to invitation from/cc.  
@@ -99,7 +99,7 @@ Project Overview
 
 - **Environment variables:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (in `.env.local`, never committed)  
 - **Supabase client:** Import from `src/lib/supabase.js` \- exports `supabase` client  
-- **Auth:** Uses Supabase Auth (`supabase.auth.getSession()`, `supabase.auth.signInWithPassword()`, etc.)  
+- **Auth:** Uses Supabase Auth (`supabase.auth.getSession()`, `supabase.auth.signInWithPassword()`, etc.). Login identity is **`members.email`** (`@spanationwide.org`); `original_email` is personal/contact only.  
 - **Queries:** Use Supabase JS client (`supabase.from('table').select()`, `.insert()`, `.update()`, `.delete()`)  
 - **RPC calls:** `supabase.rpc('function_name', { params })`  
 - **Storage:** `supabase.storage.from('bucket').upload()`, `.download()`, `.getPublicUrl()`

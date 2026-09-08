@@ -15,7 +15,7 @@ After registration is complete, every member sees these sections (in the order a
 
 - **Profile header** — Photo (or initials), name, role, LinkedIn/Instagram links, "Change profile picture", and "Download My SPANCard." **Preferred public name** (if used) can be edited inline next to the heading via the pencil control.
 - **Your Info** — Read-only contact and profile info from their `members` row (legal and contact fields; display naming follows **`memberDisplayName`** helpers).
-- **Leave & extension requests** — Submit a leave/break or extension request; view their own requests (View button opens modal with details and, for execs, approve/decline and comments).
+- **Leave & extension requests** — Submit a leave/break or extension request; view their own requests (View button opens modal with details and, for execs, approve/decline and comments). The Leave section also hosts a **unified calendar** (birthdays, SPAN events, team-lead deadlines) where enabled — see `dashboard_calendar_events` and leave calendar UI components.
 - **Ideas & suggestions** — Submit an idea (bill idea, general interest, or web/feature suggestion) with title and optional description; view their own suggestions and status. The list defaults to the **Pending** filter for execs.
 - **Volunteer Hours** — Add their own entries (date/time or hours, job title, description); view their own entries with status (waiting / approved / denied) and supervisor comment.
 - **HR Reports** — Submit an HR report; view their own reports.

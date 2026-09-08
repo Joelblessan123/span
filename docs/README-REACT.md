@@ -22,10 +22,10 @@ Local credentials: **[SETUP.md](./SETUP.md)** and **[README-ENV.md](./README-ENV
 Authoritative detail: **[../WORK_SUMMARY.txt](../WORK_SUMMARY.txt)** §0 and **[DASHBOARD_FUNCTIONS.md](./DASHBOARD_FUNCTIONS.md)**. At a glance:
 
 - **Permissions:** `volunteer`, `applications`, `bills`, `registration`, `blog` on `members`; execs have all five.
-- **Public:** Home, Bills (PDF/Doc links, LegiScan, optional status timeline), Blog + post page, Directory, Our Story, Application form.
-- **Auth:** **`LoginPage.jsx`** (React) — not legacy vanilla.
-- **Dashboard (`DashboardPage.jsx`):** profile, leave/extension requests, bills (submit + exec management), **assigned work / open pool**, **research** (SPAN + LegiScan + compare), **outreach**, applications (full pipeline + Resend emails), volunteer hours (approve/deny, reviewer metadata, verification PDF email), ideas/suggestions, HR reports, member management, schools/partners, Medium OTP (**blog** perm), password change, exec **view-as** another member.
-- **Transactional email:** Mostly **Resend** via Edge Functions (invite, onboard scheduling, rejection, volunteer verification, etc.); see **`supabase/functions/`** and **COPILOT_CONTEXT.md**.
+- **Public:** Home, Bills (PDF/Doc links, LegiScan, optional status timeline), Blog + post page, Directory (incl. advisory board where configured), Our Story, Application form.
+- **Auth:** **`LoginPage.jsx`** — SPAN email login; Forgot Password → **`hyper-endpoint`** (source `password-reset/`). See **FIRST_LOGIN_AND_REGISTRATION.md**.
+- **Dashboard (`DashboardPage.jsx`):** profile, leave/extension + **unified calendar** (birthdays/events/deadlines), dark mode, bills (submit + exec management), **assigned work / open pool**, **research** (SPAN + LegiScan + compare), **outreach**, applications (pipeline + Resend emails + **AI screening**), volunteer hours, ideas/suggestions, HR/conduct lifecycle, member management, schools/partners, **Classroom** (where enabled), Medium OTP (**blog** perm), password change, exec **view-as**.
+- **Transactional email:** Mostly **Resend** via Edge Functions (invite, onboard scheduling, rejection, volunteer verification, password reset, etc.); see **`supabase/functions/`** and **COPILOT_CONTEXT.md**.
 
 ---
 

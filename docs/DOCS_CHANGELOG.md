@@ -5,6 +5,15 @@ Dates use the **commit author date** (local calendar day) from `git log` for eac
 
 ---
 
+## 2026-09-07
+
+- **Password reset / login identity** — `FIRST_LOGIN_AND_REGISTRATION.md` (§1b Forgot Password), `CODEBASE_ARCHITECTURE.md`, `COPILOT_CONTEXT.md`, `DEPLOYMENT.md` (deploy `password-reset` as **`hyper-endpoint`**), `email-templates/PASSWORD_RESET_EMAIL_TEMPLATE.html` + README, `README-REACT.md`, `ADDING_A_NEW_MEMBER.md`, `APPLYING_AND_APPLICATION_REVIEW.md` (AI screening), `DASHBOARD_FUNCTIONS.md` / `leave-and-extension-requests.md` (calendar), `DOCS_CHANGELOG.md`.
+  - Lookup via `members.email` / `original_email`; Auth preferred by SPAN email; alphanumeric temp passwords; email states SPAN login address.
+  - Support notes: temp password fails when logging in with personal email; frontend must call `hyper-endpoint`.
+- **WORK_SUMMARY.txt §0** — Auth/password-reset detail; applications AI screening; leave calendar / dashboard UX; Classroom; HR lifecycle; security/perf; edge-function deploy aliases.
+
+---
+
 ## 2026-05-03
 
 - **Policy teams, member naming, assignments, RLS** — `ADDING_A_NEW_MEMBER.md`, `CODEBASE_ARCHITECTURE.md`, `DATABASE_ARCHITECTURE.md`, `DASHBOARD_FUNCTIONS.md`, `MIGRATION_POLICY_TEAMS.md`, `BILLS_EXEC_SUITE_SPEC.md`, `COPILOT_CONTEXT.md`, `DOCS_CHANGELOG.md`; `5acf2d5` (*feat: policy team kinds, member names, assignments, and member RLS fix*).
