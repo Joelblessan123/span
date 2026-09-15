@@ -84,34 +84,45 @@ const extractAuthorName = (item) => {
 }
 
 const resolveAuthor = (item, memberLookup) => {
-  if (!memberLookup || memberLookup.size === 0) {
-    return { name: 'SPAN', link: '/index.html', avatar: '/images/index/logo-icon-light.svg' }
-  }
+  const defaultAuthor = { name: 'SPAN', link: '/index.html', avatar: '/images/index/logo-icon-light.svg' }
   const authorName = extractAuthorName(item)
   if (!authorName) {
-    return { name: 'SPAN', link: '/index.html', avatar: '/images/index/logo-icon-light.svg' }
+    return defaultAuthor
   }
   const segments = authorName.split(/(?:,|&| and )/i).map((segment) => segment.trim()).filter(Boolean)
-  for (const segment of segments) {
-    const candidates = getCandidateNames(segment)
-    for (const candidate of candidates) {
-      const normalized = normalizeName(candidate)
-      if (!normalized) continue
-      const member = memberLookup.get(normalized)
-      if (member) {
-        const displayName = memberSiteDisplayName(member) || authorName
-        const avatar = member.image
-          ? (member.image.startsWith('http') ? member.image : `${MEMBER_IMAGE_BASE_URL}/${member.image}`)
-          : '/images/index/logo-icon-light.svg'
-        return {
-          name: displayName,
-          link: `/directory.html?search=${encodeURIComponent(displayName)}`,
-          avatar
+  const displayFallback = segments.find((s) => !/^students for patient advocacy/i.test(s)) || segments[0] || authorName
+
+  if (memberLookup && memberLookup.size > 0) {
+    for (const segment of segments) {
+      const candidates = getCandidateNames(segment)
+      for (const candidate of candidates) {
+        const normalized = normalizeName(candidate)
+        if (!normalized) continue
+        const member = memberLookup.get(normalized)
+        if (member) {
+          const displayName = memberSiteDisplayName(member) || displayFallback
+          const avatar = member.image
+            ? (member.image.startsWith('http') ? member.image : `${MEMBER_IMAGE_BASE_URL}/${member.image}`)
+            : '/images/index/logo-icon-light.svg'
+          return {
+            name: displayName,
+            link: `/directory.html?search=${encodeURIComponent(displayName)}`,
+            avatar
+          }
         }
       }
     }
   }
-  return { name: 'SPAN', link: '/index.html', avatar: '/images/index/logo-icon-light.svg' }
+
+  if (displayFallback && !/^students for patient advocacy/i.test(displayFallback)) {
+    return {
+      name: displayFallback,
+      link: `/directory.html?search=${encodeURIComponent(displayFallback)}`,
+      avatar: '/images/index/logo-icon-light.svg'
+    }
+  }
+
+  return defaultAuthor
 }
 
 // Clean and sanitize HTML content for safe display

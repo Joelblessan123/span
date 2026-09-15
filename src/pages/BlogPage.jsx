@@ -90,34 +90,44 @@ const resolveMemberAvatar = (image) => {
 }
 
 const resolveAuthor = (item, memberLookup) => {
-  if (!memberLookup || memberLookup.size === 0) {
-    return { ...DEFAULT_AUTHOR }
-  }
-
   const authorName = extractAuthorName(item)
   if (!authorName) {
     return { ...DEFAULT_AUTHOR }
   }
 
   const segments = authorName.split(/(?:,|&| and )/i).map((segment) => segment.trim()).filter(Boolean)
+  // Prefer a person-looking first segment ("Noah Love") over org RSS author.
+  const displayFallback = segments.find((s) => !/^students for patient advocacy/i.test(s)) || segments[0] || authorName
 
-  for (const segment of segments) {
-    const candidates = getCandidateNames(segment)
-    for (const candidate of candidates) {
-      const normalized = normalizeName(candidate)
-      if (!normalized) continue
+  if (memberLookup && memberLookup.size > 0) {
+    for (const segment of segments) {
+      const candidates = getCandidateNames(segment)
+      for (const candidate of candidates) {
+        const normalized = normalizeName(candidate)
+        if (!normalized) continue
 
-      const member = memberLookup.get(normalized)
-      if (member) {
-        const displayName = memberSiteDisplayName(member) || authorName
+        const member = memberLookup.get(normalized)
+        if (member) {
+          const displayName = memberSiteDisplayName(member) || displayFallback
 
-        const avatar = resolveMemberAvatar(member.image)
-        return {
-          name: displayName,
-          link: `/directory.html?search=${encodeURIComponent(displayName)}`,
-          avatar
+          const avatar = resolveMemberAvatar(member.image)
+          return {
+            name: displayName,
+            link: `/directory.html?search=${encodeURIComponent(displayName)}`,
+            avatar
+          }
         }
       }
+    }
+  }
+
+  // Keep byline name even when the writer is not (yet) in the public directory,
+  // so author filters and cards don't collapse everyone to "SPAN".
+  if (displayFallback && !/^students for patient advocacy/i.test(displayFallback)) {
+    return {
+      name: displayFallback,
+      link: `/directory.html?search=${encodeURIComponent(displayFallback)}`,
+      avatar: DEFAULT_AUTHOR.avatar
     }
   }
 
