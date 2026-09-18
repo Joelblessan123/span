@@ -1,0 +1,3 @@
+# Auth is enforced inside the function (exec member check).
+# Gateway JWT on OPTIONS strips CORS and breaks localhost → functions calls.
+verify_jwt = false

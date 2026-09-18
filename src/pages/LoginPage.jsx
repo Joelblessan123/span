@@ -9,6 +9,9 @@ function readLoginIntent() {
   if (modeParam === 'classroom' || next.includes('/classroom/')) {
     return { mode: 'classroom', next: next || '/classroom/dashboard.html' }
   }
+  if (modeParam === 'mentor') {
+    return { mode: 'mentor', next: next || '/dashboard.html' }
+  }
   return { mode: 'members', next: next || '/dashboard.html' }
 }
 
@@ -35,6 +38,7 @@ function LoginPage() {
   const streamRef = useRef(null)
   const canvasRef = useRef(null)
   const isClassroom = loginMode === 'classroom'
+  const isMentor = loginMode === 'mentor'
 
   const resolvePostLoginDestination = useCallback((preferredMode) => {
     if (preferredMode === 'classroom') {
@@ -50,7 +54,14 @@ function LoginPage() {
     setError('')
 
     let loginEmail = email.trim()
-    if (!isClassroom && !loginEmail.includes('@')) {
+    if (isMentor) {
+      const username = loginEmail.replace(/@.*$/, '').toLowerCase()
+      if (!username) {
+        setError('Enter your mentor username.')
+        return
+      }
+      loginEmail = `${username}@mentors.spanationwide.org`
+    } else if (!isClassroom && !loginEmail.includes('@')) {
       loginEmail += '@spanationwide.org'
     }
 
@@ -63,7 +74,7 @@ function LoginPage() {
       window.location.href = resolvePostLoginDestination(loginMode)
     } catch (err) {
       const msg = err.message || 'Login failed. Please try again.'
-      if (isClassroom) {
+      if (isClassroom || isMentor) {
         setError(msg)
         return
       }
@@ -85,6 +96,9 @@ function LoginPage() {
     if (mode === 'classroom') {
       url.searchParams.set('mode', 'classroom')
       url.searchParams.set('next', '/classroom/dashboard.html')
+    } else if (mode === 'mentor') {
+      url.searchParams.set('mode', 'mentor')
+      url.searchParams.delete('next')
     } else {
       url.searchParams.delete('mode')
       url.searchParams.delete('next')
@@ -101,6 +115,11 @@ function LoginPage() {
     let recoveryEmail = forgotPasswordEmail.trim()
 
     try {
+      if (isMentor) {
+        throw new Error(
+          'Mentor accounts use a shared username (no email inbox). Ask a SPAN executive director to reset your password from the Board of Mentors list.'
+        )
+      }
       if (isClassroom) {
         if (!recoveryEmail.includes('@')) {
           throw new Error('Enter the full email for your classroom account.')
@@ -359,7 +378,9 @@ function LoginPage() {
           <p className="lead" data-aos="fade-up" data-aos-duration="1000" data-aos-delay="200">
             {isClassroom
               ? 'Sign in to SPAN Classroom as a teacher or student.'
-              : 'Access your SPAN member dashboard.'}
+              : isMentor
+                ? 'Sign in to view SPAN policy outreach tools.'
+                : 'Access your SPAN member dashboard.'}
           </p>
         </div>
       </section>
@@ -371,11 +392,20 @@ function LoginPage() {
               <button
                 type="button"
                 role="tab"
-                aria-selected={!isClassroom}
-                className={`login-mode-btn${!isClassroom ? ' is-active' : ''}`}
+                aria-selected={!isClassroom && !isMentor}
+                className={`login-mode-btn${!isClassroom && !isMentor ? ' is-active' : ''}`}
                 onClick={() => switchMode('members')}
               >
                 SPAN members
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isMentor}
+                className={`login-mode-btn${isMentor ? ' is-active' : ''}`}
+                onClick={() => switchMode('mentor')}
+              >
+                Mentor
               </button>
               <button
                 type="button"
@@ -391,20 +421,29 @@ function LoginPage() {
             <form onSubmit={handleEmailLogin}>
               <div className="mb-3">
                 <label htmlFor="email" className="form-label">
-                  {isClassroom ? 'Email' : 'SPAN email'}
+                  {isClassroom ? 'Email' : isMentor ? 'Username' : 'SPAN email'}
                 </label>
                 <input
                   type={isClassroom ? 'email' : 'text'}
                   className="form-control"
                   id="email"
-                  placeholder={isClassroom ? 'Your school email' : 'name@spanationwide.org'}
+                  placeholder={
+                    isClassroom
+                      ? 'Your school email'
+                      : isMentor
+                        ? 'firstname.lastname.4821'
+                        : 'name@spanationwide.org'
+                  }
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   autoComplete="username"
                 />
-                {!isClassroom && (
+                {!isClassroom && !isMentor && (
                   <small className="text-muted">Use your SPAN address, not your personal email</small>
+                )}
+                {isMentor && (
+                  <small className="text-muted">Use the username SPAN shared with you (not an email)</small>
                 )}
               </div>
               <div className="mb-3">
@@ -442,6 +481,10 @@ function LoginPage() {
               <p className="text-center small text-muted mb-0 mt-2">
                 New student?{' '}
                 <a href="/classroom/join.html">Join with a class code</a>
+              </p>
+            ) : isMentor ? (
+              <p className="text-center small text-muted mb-0 mt-2">
+                Need a password reset? Ask a SPAN executive director.
               </p>
             ) : (
               <>

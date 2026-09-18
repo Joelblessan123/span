@@ -112,7 +112,7 @@
 
 .login-mode-switch {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 0.35rem;
   padding: 0.3rem;
   margin-bottom: 1.25rem;
@@ -126,9 +126,9 @@
   border-radius: 0.35rem;
   background: transparent;
   color: #495057;
-  font-size: 0.92rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem 0.4rem;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 

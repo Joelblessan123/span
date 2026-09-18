@@ -69,6 +69,7 @@ export default function BillSubmissionSection({
   outreachBills,
   member,
   loadAllBills,
+  mentorOnly = false,
 }) {
   const { billsByState, sortedStates } = useMemo(() => {
     const grouped = {}
@@ -96,15 +97,23 @@ export default function BillSubmissionSection({
     <section id={sectionId} className="mt-5 dashboard-section-anchor" style={{ order: sectionOrder }}>
       <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div>
-          <h3 className="mb-0">{viewAsData ? 'Assigned to me' : 'Bill Submission'}</h3>
+          <h3 className="mb-0">
+            {viewAsData ? 'Assigned to me' : mentorOnly ? 'Policy tools' : 'Bill Submission'}
+          </h3>
           {viewAsData && (
             <p className="small text-muted mb-0 mt-1">
               {effectiveMember?.first_name} {effectiveMember?.last_name} (read-only)
             </p>
           )}
+          {mentorOnly && !viewAsData && (
+            <p className="small text-muted mb-0 mt-1">
+              Research bills on LegiScan and compose outreach (preview only — mentors cannot send email on SPAN’s
+              behalf).
+            </p>
+          )}
         </div>
 
-        {!viewAsData && memberBillSectionTab === 'my_bills' && (
+        {!viewAsData && !mentorOnly && memberBillSectionTab === 'my_bills' && (
           <button className="btn btn-dark" onClick={handleAddBill}>
             <i className="bi bi-plus-circle me-2"></i>Submit Bill for Review
           </button>
@@ -113,33 +122,37 @@ export default function BillSubmissionSection({
 
       {!viewAsData && (
         <div className="btn-group mb-3" role="group">
-          <button
-            type="button"
-            className={`btn btn-sm ${
-              memberBillSectionTab === 'my_bills' ? 'btn-primary' : 'btn-outline-secondary'
-            }`}
-            onClick={() => setMemberBillSectionTab('my_bills')}
-          >
-            All bills
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${
-              memberBillSectionTab === 'assigned_to_me' ? 'btn-primary' : 'btn-outline-secondary'
-            }`}
-            onClick={() => setMemberBillSectionTab('assigned_to_me')}
-          >
-            Assigned to me
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${
-              memberBillSectionTab === 'open_tasks' ? 'btn-primary' : 'btn-outline-secondary'
-            }`}
-            onClick={() => setMemberBillSectionTab('open_tasks')}
-          >
-            Open tasks
-          </button>
+          {!mentorOnly && (
+            <>
+              <button
+                type="button"
+                className={`btn btn-sm ${
+                  memberBillSectionTab === 'my_bills' ? 'btn-primary' : 'btn-outline-secondary'
+                }`}
+                onClick={() => setMemberBillSectionTab('my_bills')}
+              >
+                All bills
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${
+                  memberBillSectionTab === 'assigned_to_me' ? 'btn-primary' : 'btn-outline-secondary'
+                }`}
+                onClick={() => setMemberBillSectionTab('assigned_to_me')}
+              >
+                Assigned to me
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${
+                  memberBillSectionTab === 'open_tasks' ? 'btn-primary' : 'btn-outline-secondary'
+                }`}
+                onClick={() => setMemberBillSectionTab('open_tasks')}
+              >
+                Open tasks
+              </button>
+            </>
+          )}
           <button
             type="button"
             className={`btn btn-sm ${

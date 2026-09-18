@@ -10,6 +10,7 @@ import {
 } from '../lib/proposalPdf'
 import { fetchLegiscanBillBySearch, isLegiscanBillNumberShape } from '../lib/legiscan'
 import { getClassroomSessionRole } from '../lib/classroom'
+import { getMentorSession, provisionMentorLogin, syntheticMemberFromMentorSession } from '../lib/mentors'
 import { isAllowedApplicationStatusTransition } from './dashboard/applications'
 import BillAssignmentsExecPanel from './dashboard/BillAssignmentsExecPanel'
 import {
@@ -34,6 +35,7 @@ import LeaveRequestQuickReviewModal from './dashboard/LeaveRequestQuickReviewMod
 import LeaveRequestSubmitModal from './dashboard/LeaveRequestSubmitModal'
 import LeaveRequestViewModal from './dashboard/LeaveRequestViewModal'
 import SuggestionViewModal from './dashboard/SuggestionViewModal'
+import MentorCredentialsModal from './dashboard/MentorCredentialsModal'
 import BillPdfPreviewModal from './dashboard/BillPdfPreviewModal'
 import DeleteVolunteerEntryModal from './dashboard/DeleteVolunteerEntryModal'
 import YourInfoSection from './dashboard/YourInfoSection'
@@ -401,6 +403,9 @@ function DashboardPage() {
   const [draggedSchoolId, setDraggedSchoolId] = useState(null)
   const [draggedPartnerId, setDraggedPartnerId] = useState(null)
   const [advisors, setAdvisors] = useState([])
+  const [mentorAccountsByAdvisorId, setMentorAccountsByAdvisorId] = useState({})
+  const [mentorCredentialsModal, setMentorCredentialsModal] = useState(null)
+  const [mentorProvisionBusyId, setMentorProvisionBusyId] = useState(null)
   const [showAdvisorModal, setShowAdvisorModal] = useState(false)
   const [editingAdvisorId, setEditingAdvisorId] = useState(null)
   const [advisorForm, setAdvisorForm] = useState({
@@ -696,37 +701,44 @@ function DashboardPage() {
 
   // Load additional data based on permissions after member is loaded
   useEffect(() => {
-    if (member) {
-      loadPolicyTeams()
-      loadBillAssignments()
-      // Load bills based on permissions
+    if (!member) return
+
+    if (member._isMentor) {
       if (hasPermission('bills')) {
         loadAllBills()
         loadResearchBills()
       }
-      if (hasPermission('applications')) {
-        loadApplications()
-      }
-      if (hasPermission('registration')) {
-        loadAllMembersForManagement()
-      }
-      if (hasPermission('volunteer') && hasPermission('applications') && hasPermission('bills') && hasPermission('registration')) {
-        loadHrReports()
-        loadExecConductData()
-        loadAllMemberRequests()
-        loadAllSuggestions()
-        loadSchools()
-        loadPartners()
-        loadAdvisors()
-      } else if (member) {
-        loadMyHrReports()
-      }
-      loadMyRequests()
-      if (member) loadMySuggestions()
-      loadCalendarBirthdays()
-      loadDashboardCalendarEvents()
-      if (member) loadMyResignations()
+      return
     }
+
+    loadPolicyTeams()
+    loadBillAssignments()
+    if (hasPermission('bills')) {
+      loadAllBills()
+      loadResearchBills()
+    }
+    if (hasPermission('applications')) {
+      loadApplications()
+    }
+    if (hasPermission('registration')) {
+      loadAllMembersForManagement()
+    }
+    if (hasPermission('volunteer') && hasPermission('applications') && hasPermission('bills') && hasPermission('registration')) {
+      loadHrReports()
+      loadExecConductData()
+      loadAllMemberRequests()
+      loadAllSuggestions()
+      loadSchools()
+      loadPartners()
+      loadAdvisors()
+    } else {
+      loadMyHrReports()
+    }
+    loadMyRequests()
+    loadMySuggestions()
+    loadCalendarBirthdays()
+    loadDashboardCalendarEvents()
+    loadMyResignations()
   }, [member, viewAsData])
 
   // View-as mode: when URL has ?viewAs=member_id and current user is exec, fetch that member's dashboard
@@ -999,6 +1011,20 @@ function DashboardPage() {
     }
 
     setAdvisors(data || [])
+
+    const { data: mentorRows, error: mentorErr } = await supabase
+      .from('mentor_accounts')
+      .select('mentor_account_id, advisor_id, username, login_email, active, provisioned_at')
+    if (mentorErr) {
+      console.warn('Mentor accounts load skipped:', mentorErr.message)
+      setMentorAccountsByAdvisorId({})
+      return
+    }
+    const map = {}
+    ;(mentorRows || []).forEach((row) => {
+      map[row.advisor_id] = row
+    })
+    setMentorAccountsByAdvisorId(map)
   }
 
   // Load HR reports (executive directors only, filtered to exclude reports about themselves)
@@ -2274,8 +2300,28 @@ function DashboardPage() {
   })
 
   const isTeamLeadOnly = isTeamLeadUser && !isExec
+  const isMentor = !!member?._isMentor
   const effectiveSuggestions = viewAsData ? [] : (isExec ? filteredSuggestions : mySuggestions)
-  const dashboardOrder = isExec
+  const dashboardOrder = isMentor
+    ? {
+        billSubmission: 1,
+        changePassword: 2,
+        yourInfo: 99,
+        leaveExtension: 99,
+        billManagement: 99,
+        applications: 99,
+        ideasSuggestions: 99,
+        volunteerHours: 99,
+        hrReports: 99,
+        execConduct: 99,
+        memberManagement: 99,
+        schoolsPartners: 99,
+        classroom: 99,
+        analytics: 99,
+        mediumBlog: 99,
+        resignFromSpan: 99,
+      }
+    : isExec
     ? {
         yourInfo: 1,
         leaveExtension: 2,
@@ -2345,31 +2391,34 @@ function DashboardPage() {
     const showBillSubmission = (perm('bills') || memberHasAssignmentWork) && !execUser
 
     const visibility = {
-      yourInfo: true,
-      leaveExtension: true,
-      billManagement: showBillManagement,
-      billSubmission: showBillSubmission,
-      applications: perm('applications'),
-      ideasSuggestions: true,
-      volunteerHours: true,
-      hrReports: true,
-      execConduct: execUser,
-      memberManagement: perm('registration'),
-      schoolsPartners: execUser,
-      classroom: execUser,
-      analytics: execUser,
-      mediumBlog: perm('blog'),
+      yourInfo: !isMentor,
+      leaveExtension: !isMentor,
+      billManagement: showBillManagement && !isMentor,
+      billSubmission: isMentor ? true : showBillSubmission,
+      applications: perm('applications') && !isMentor,
+      ideasSuggestions: !isMentor,
+      volunteerHours: !isMentor,
+      hrReports: !isMentor,
+      execConduct: execUser && !isMentor,
+      memberManagement: perm('registration') && !isMentor,
+      schoolsPartners: execUser && !isMentor,
+      classroom: execUser && !isMentor,
+      analytics: execUser && !isMentor,
+      mediumBlog: perm('blog') && !isMentor,
       changePassword: true,
-      resignFromSpan: true,
+      resignFromSpan: !isMentor,
     }
 
     const labelOverrides = {}
+    if (isMentor) {
+      labelOverrides.billSubmission = 'Policy tools'
+    }
     if (teamLeadOnly && showBillManagement) {
       labelOverrides.billManagement = 'Team — Assigned work'
     }
 
     return buildDashboardSectionNavItems(dashboardOrder, visibility, labelOverrides)
-  }, [viewAsData, member, isTeamLeadUser, memberHasAssignmentWork, dashboardOrder])
+  }, [viewAsData, member, isTeamLeadUser, memberHasAssignmentWork, dashboardOrder, isMentor])
 
   const strikeCountByMember = useMemo(() => {
     const m = {}
@@ -2505,7 +2554,19 @@ function DashboardPage() {
       }
 
       if (!memberData) {
-        console.log('No chapter member record; checking classroom role…')
+        console.log('No chapter member record; checking mentor / classroom…')
+        try {
+          const mentorSession = await getMentorSession()
+          const synthetic = syntheticMemberFromMentorSession(mentorSession)
+          if (synthetic) {
+            setMember(synthetic)
+            setMemberBillSectionTab('outreach')
+            setLoading(false)
+            return
+          }
+        } catch (mentorErr) {
+          console.warn('Mentor session check failed:', mentorErr)
+        }
         try {
           const classroomRole = await getClassroomSessionRole()
           if (classroomRole?.role) {
@@ -5788,6 +5849,23 @@ function DashboardPage() {
     }
   }
 
+  const handleProvisionMentorLogin = async (advisorId, action = 'provision') => {
+    if (!advisorId) return
+    const label = action === 'reset_password' ? 'reset this mentor’s password' : 'create a login for this mentor'
+    if (!window.confirm(`Are you sure you want to ${label}?`)) return
+    setMentorProvisionBusyId(advisorId)
+    try {
+      const result = await provisionMentorLogin(advisorId, action)
+      setMentorCredentialsModal(result)
+      await loadAdvisors()
+    } catch (err) {
+      console.error('Mentor provision failed:', err)
+      alert(err.message || 'Failed to provision mentor login.')
+    } finally {
+      setMentorProvisionBusyId(null)
+    }
+  }
+
   const handleAdvisorDragStart = (e, advisorId) => {
     setDraggedAdvisorId(advisorId)
     e.dataTransfer.effectAllowed = 'move'
@@ -5984,7 +6062,9 @@ function DashboardPage() {
         <div className="parallax-bg" aria-hidden="true"></div>
         <div className="container position-relative z-1">
           <h1 className="display-3 fw-bold mb-2" data-aos="fade-up">Dashboard</h1>
-          <p className="lead" data-aos="fade-up" data-aos-delay="200">Manage your SPAN membership.</p>
+          <p className="lead" data-aos="fade-up" data-aos-delay="200">
+            {isMentor ? 'Mentor access to SPAN policy tools.' : 'Manage your SPAN membership.'}
+          </p>
         </div>
       </section>
 
@@ -6025,6 +6105,25 @@ function DashboardPage() {
         <DashboardSectionNav items={dashboardSectionNavItems} />
 
         {/* Profile Header */}
+        {isMentor ? (
+          <div className="text-center mb-5">
+            {effectiveMember.image ? (
+              <img
+                src={`${ADVISORS_IMAGES_BASE_URL}/${effectiveMember.image}`}
+                className="rounded-circle border border-dark border-3 mb-3"
+                alt=""
+                style={{ width: '120px', height: '120px', objectFit: 'cover' }}
+              />
+            ) : null}
+            <h2 className="mb-1">{dashboardDisplayName}</h2>
+            <p className="text-muted mb-1">Board Mentor</p>
+            {member.username && (
+              <p className="small text-muted mb-0">
+                Username: <span className="font-monospace">{member.username}</span>
+              </p>
+            )}
+          </div>
+        ) : (
         <div className="text-center mb-5">
           <input
             ref={profilePicInputRef}
@@ -6173,8 +6272,10 @@ function DashboardPage() {
             </button>
           )}
         </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {!isMentor && (
         <YourInfoSection
           sectionId={DASHBOARD_SECTION_IDS.yourInfo}
           sectionOrder={dashboardOrder.yourInfo}
@@ -6184,8 +6285,10 @@ function DashboardPage() {
           formatPhone={formatPhone}
           onMemberInfoUpdated={handleMemberInfoUpdated}
         />
+        )}
 
         <Suspense fallback={<DashboardLazyFallback label="Loading dashboard panels…" />}>
+        {!isMentor && (
         <LeaveExtensionSection
           sectionId={DASHBOARD_SECTION_IDS.leaveExtension}
           sectionOrder={dashboardOrder.leaveExtension}
@@ -6229,7 +6332,9 @@ function DashboardPage() {
           }}
           onViewRequest={openRequestViewModal}
         />
+        )}
 
+        {!isMentor && (
         <IdeasSuggestionsSection
           sectionId={DASHBOARD_SECTION_IDS.ideasSuggestions}
           sectionOrder={dashboardOrder.ideasSuggestions}
@@ -6249,7 +6354,9 @@ function DashboardPage() {
           formatDateLong={formatDateLong}
           onViewSuggestion={openSuggestionViewModal}
         />
+        )}
 
+        {!isMentor && (
         <VolunteerHoursSection
           sectionId={DASHBOARD_SECTION_IDS.volunteerHours}
           sectionOrder={dashboardOrder.volunteerHours}
@@ -6279,6 +6386,7 @@ function DashboardPage() {
                                         }}
           onSendVerification={handleSendVerification}
         />
+        )}
 
         {/* Bill Management Section - full exec tools (all 4 permissions) */}
         {(() => {
@@ -6431,6 +6539,7 @@ function DashboardPage() {
             outreachBills={execOutreachBills}
             member={member}
             loadAllBills={loadAllBills}
+            mentorOnly={isMentor}
           />
         )}
 
@@ -6511,7 +6620,9 @@ function DashboardPage() {
             <h3 className="mb-4">Schools, Partners &amp; Mentors</h3>
             <div className="alert alert-info mb-4">
               <i className="bi bi-info-circle me-2"></i>
-              Manage schools and partners on the homepage, and Board of Mentors members on the Members page Leadership tab. No login accounts are created for mentors.
+              Manage schools and partners on the homepage, and Board of Mentors on the Members page Leadership tab.
+              You can provision mentor logins (username + password) so they can try Research and Outreach without seeing
+              HR, applications, or other member sections.
             </div>
 
             <div className="row g-4">
@@ -6735,11 +6846,14 @@ function DashboardPage() {
                               <th>Name</th>
                               <th>Title / Company</th>
                               <th>Status</th>
+                              <th>Login</th>
                               <th>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {advisors.map((advisor) => (
+                            {advisors.map((advisor) => {
+                              const mentorLogin = mentorAccountsByAdvisorId[advisor.advisor_id]
+                              return (
                               <tr
                                 key={advisor.advisor_id}
                                 draggable
@@ -6776,8 +6890,18 @@ function DashboardPage() {
                                     {advisor.active ? 'Active' : 'Inactive'}
                                   </span>
                                 </td>
+                                <td className="small">
+                                  {mentorLogin?.username ? (
+                                    <>
+                                      <span className="badge bg-primary mb-1">Login ready</span>
+                                      <div className="font-monospace text-muted">{mentorLogin.username}</div>
+                                    </>
+                                  ) : (
+                                    <span className="text-muted">Not provisioned</span>
+                                  )}
+                                </td>
                                 <td>
-                                  <div className="d-flex gap-1" onMouseDown={(e) => e.stopPropagation()}>
+                                  <div className="d-flex gap-1 flex-wrap" onMouseDown={(e) => e.stopPropagation()}>
                                     <button
                                       type="button"
                                       className="btn btn-sm btn-outline-primary"
@@ -6790,6 +6914,33 @@ function DashboardPage() {
                                     >
                                       <i className="bi bi-pencil" aria-hidden="true"></i>
                                     </button>
+                                    {mentorLogin?.username ? (
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline-dark"
+                                        disabled={mentorProvisionBusyId === advisor.advisor_id}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleProvisionMentorLogin(advisor.advisor_id, 'reset_password')
+                                        }}
+                                        title="Reset password"
+                                      >
+                                        {mentorProvisionBusyId === advisor.advisor_id ? '…' : 'Reset password'}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-dark"
+                                        disabled={mentorProvisionBusyId === advisor.advisor_id || !advisor.active}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleProvisionMentorLogin(advisor.advisor_id, 'provision')
+                                        }}
+                                        title="Create mentor login"
+                                      >
+                                        {mentorProvisionBusyId === advisor.advisor_id ? '…' : 'Provision login'}
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       className="btn btn-sm btn-outline-danger"
@@ -6805,7 +6956,8 @@ function DashboardPage() {
                                   </div>
                                 </td>
                               </tr>
-                            ))}
+                              )
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -6849,6 +7001,7 @@ function DashboardPage() {
           />
         )}
 
+        {!isMentor && (
         <HrReportsSection
           sectionId={DASHBOARD_SECTION_IDS.hrReports}
           sectionOrder={dashboardOrder.hrReports}
@@ -6893,6 +7046,7 @@ function DashboardPage() {
             setShowPolicyViolationEmailModal(true)
           }}
         />
+        )}
 
         {hasPermission('volunteer') &&
           hasPermission('applications') &&
@@ -7014,7 +7168,7 @@ function DashboardPage() {
           </div>
         </section>
 
-        {!viewAsData && member && (
+        {!viewAsData && member && !isMentor && (
           <ResignFromSpanSection
             sectionId={DASHBOARD_SECTION_IDS.resignFromSpan}
             sectionOrder={dashboardOrder.resignFromSpan}
@@ -7102,6 +7256,12 @@ function DashboardPage() {
         setSuggestionReviewNotes={setSuggestionReviewNotes}
         onSaveComment={handleSuggestionCommentSave}
         onStatusChange={handleSuggestionStatusChangeFromView}
+      />
+
+      <MentorCredentialsModal
+        open={!!mentorCredentialsModal}
+        credentials={mentorCredentialsModal}
+        onClose={() => setMentorCredentialsModal(null)}
       />
 
       <VolunteerSupervisorCommentModal

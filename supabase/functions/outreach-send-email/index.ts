@@ -88,12 +88,6 @@ function formatFromHeader(displayName: string, email: string): string {
 }
 
 /** Direct / reference outreach appears from the caller's SPAN address when derivable; else env default. */
-function outreachFromHeader(member: Record<string, unknown> | null): string {
-  const addr = submitterSpanEmail(member)
-  if (!addr) return fromAddress()
-  return formatFromHeader(submitterDisplayName(member), addr)
-}
-
 function isExec(member: Record<string, unknown> | null): boolean {
   if (!member) return false
   const v = (x: unknown) => x === true || x === "true"
@@ -106,8 +100,21 @@ function hasBillsPermission(member: Record<string, unknown> | null): boolean {
   return v(member.bills)
 }
 
-function canUseOutreachEmail(member: Record<string, unknown> | null): boolean {
-  return isExec(member) || hasBillsPermission(member)
+function canUseOutreachEmail(
+  member: Record<string, unknown> | null,
+  isMentor = false,
+): boolean {
+  return isExec(member) || hasBillsPermission(member) || isMentor
+}
+
+/** Direct / reference outreach appears from the caller's SPAN address when derivable; else env default. */
+function outreachFromHeader(member: Record<string, unknown> | null, isMentor = false): string {
+  if (isMentor) return fromAddress()
+  const addr = submitterSpanEmail(member)
+  if (!addr) return fromAddress()
+  // Never send as a synthetic mentor domain (not a real mailbox).
+  if (addr.toLowerCase().endsWith("@mentors.spanationwide.org")) return fromAddress()
+  return formatFromHeader(submitterDisplayName(member), addr)
 }
 
 function isValidEmail(s: string): boolean {
@@ -219,7 +226,28 @@ serve(async (req) => {
       .eq("user_id", user.id)
       .maybeSingle()
 
-    if (!canUseOutreachEmail(callerMember)) {
+    let isMentor = false
+    if (!callerMember) {
+      const { data: mentorRow } = await admin
+        .from("mentor_accounts")
+        .select("mentor_account_id")
+        .eq("user_id", user.id)
+        .eq("active", true)
+        .maybeSingle()
+      isMentor = !!mentorRow
+    }
+
+    // Mentors may preview compose UI client-side but must not send on SPAN's behalf.
+    if (isMentor) {
+      return new Response(
+        JSON.stringify({
+          error: "Mentor accounts can preview outreach but cannot send email on SPAN's behalf",
+        }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      )
+    }
+
+    if (!canUseOutreachEmail(callerMember, false)) {
       return new Response(
         JSON.stringify({ error: "Bills permission required to send outreach emails" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -233,7 +261,7 @@ serve(async (req) => {
       })
     }
 
-    const from = outreachFromHeader(callerMember)
+    const from = outreachFromHeader(callerMember, false)
 
     const recipients =
       mode === "reference_log" ? referenceLogRecipients() : [to]

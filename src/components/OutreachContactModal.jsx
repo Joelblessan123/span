@@ -50,6 +50,7 @@ export default function OutreachContactModal({
   const toEmail = (target?.contact_email || '').trim()
   const canMailto = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)
   const hasWebmail = !!(target?.contact_webmail_url || '').trim()
+  const isMentorViewer = !!(member && member._isMentor)
   /** Webmail-only: message is pasted as plain text; HTML preview is not useful. */
   const showHtmlPreview = canMailto
   const contactSearchUrl = useMemo(
@@ -169,6 +170,10 @@ export default function OutreachContactModal({
   }
 
   const handleSendResend = async () => {
+    if (isMentorViewer) {
+      setSendError('Mentor accounts can preview outreach but cannot send email on SPAN’s behalf.')
+      return
+    }
     if (!canMailto) {
       setSendError('Add a valid email on this row (or paste into your client after Copy).')
       return
@@ -208,6 +213,10 @@ export default function OutreachContactModal({
   }
 
   const handleSendReferenceCopy = async () => {
+    if (isMentorViewer) {
+      setRefError('Mentor accounts can preview outreach but cannot send email on SPAN’s behalf.')
+      return
+    }
     setSendingRef(true)
     setRefError('')
     setRefOk('')
@@ -310,11 +319,21 @@ export default function OutreachContactModal({
                   <button
                     type="button"
                     className="btn btn-sm btn-outline-primary"
-                    disabled={sendingRef}
+                    disabled={sendingRef || isMentorViewer}
+                    title={
+                      isMentorViewer
+                        ? 'Mentor accounts cannot send email on SPAN’s behalf'
+                        : undefined
+                    }
                     onClick={handleSendReferenceCopy}
                   >
                     {sendingRef ? 'Sending…' : 'Send reference copy to Joel & Vishank'}
                   </button>
+                  {isMentorViewer && (
+                    <p className="small text-muted mt-2 mb-0">
+                      Visible for mentors to review the flow — sending is disabled.
+                    </p>
+                  )}
                   {refError && (
                     <div className="alert alert-danger py-2 small mt-2 mb-0" role="alert">
                       {refError}
@@ -557,11 +576,21 @@ export default function OutreachContactModal({
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  disabled={sending || pdfResolving}
+                  disabled={sending || pdfResolving || isMentorViewer}
+                  title={
+                    isMentorViewer
+                      ? 'Mentor accounts cannot send email on SPAN’s behalf'
+                      : undefined
+                  }
                   onClick={handleSendResend}
                 >
                   {sending ? 'Sending…' : 'Send via SPAN email'}
                 </button>
+              )}
+              {isMentorViewer && (
+                <span className="small text-muted align-self-center">
+                  Mentor preview — send disabled
+                </span>
               )}
             </div>
           </div>

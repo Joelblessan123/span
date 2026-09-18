@@ -27,8 +27,11 @@ function hasBillsPermission(member: Record<string, unknown> | null): boolean {
   return v(member.bills)
 }
 
-function canUseOutreachFeatures(member: Record<string, unknown> | null): boolean {
-  return isExec(member) || hasBillsPermission(member)
+function canUseOutreachFeatures(
+  member: Record<string, unknown> | null,
+  isMentor = false,
+): boolean {
+  return isExec(member) || hasBillsPermission(member) || isMentor
 }
 
 function escapeContactString(s: unknown): string {
@@ -145,7 +148,18 @@ serve(async (req) => {
       .eq("user_id", user.id)
       .maybeSingle()
 
-    if (!canUseOutreachFeatures(callerMember)) {
+    let isMentor = false
+    if (!callerMember) {
+      const { data: mentorRow } = await admin
+        .from("mentor_accounts")
+        .select("mentor_account_id")
+        .eq("user_id", user.id)
+        .eq("active", true)
+        .maybeSingle()
+      isMentor = !!mentorRow
+    }
+
+    if (!canUseOutreachFeatures(callerMember, isMentor)) {
       return new Response(JSON.stringify({ error: "Bills permission required to fetch legislator contact info" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
