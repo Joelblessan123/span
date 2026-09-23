@@ -228,7 +228,6 @@ BEGIN
   JOIN public.advisors a ON a.advisor_id = ma.advisor_id
   WHERE ma.user_id = auth.uid()
     AND ma.active = true
-    AND a.active = true
   LIMIT 1;
 
   RETURN COALESCE(result, '{}'::jsonb);

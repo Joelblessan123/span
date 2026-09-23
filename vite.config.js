@@ -64,6 +64,7 @@ export default defineConfig(({ mode }) => {
         dashboard: './dashboard.html',
         'classroom/join': './classroom/join.html',
         'classroom/dashboard': './classroom/dashboard.html',
+        'mentor-join': './mentor-join.html',
         '404': './404.html',
       },
       output: {

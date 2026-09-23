@@ -1,0 +1,2 @@
+# Public invite flow — no user JWT. Token validated inside the function.
+verify_jwt = false

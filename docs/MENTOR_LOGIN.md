@@ -2,32 +2,35 @@
 
 Board of Mentors profiles live in **`advisors`** (public Leadership tab). Mentors are **not** `members` rows, so they never appear on the membership Directory list.
 
-## What we built
+## Invite self-registration (preferred)
 
-1. **`mentor_accounts`** — links an advisor to a Supabase Auth user.
-2. **Synthetic username** — e.g. `jane.doe.4821` maps to Auth email `jane.doe.4821@mentors.spanationwide.org` (no real inbox / no Cloudflare).
-3. **Login** — `/login.html?mode=mentor` → **Mentor** tab → username + password.
-4. **Dashboard** — Research + Outreach (+ Change password) only. No HR, applications, ideas, volunteer, leave, resign.
-5. **Provision UI** — Schools, Partners & Mentors → Board of Mentors → **Provision login** / **Reset password**. Credentials show once in a modal for the exec to copy and share.
-6. **Outreach for mentors** — they can pull LegiScan contacts, compose, preview, and copy messages. **Send via SPAN email** and **reference copy** are greyed out (and blocked server-side). Mentors do not send on SPAN’s behalf.
+1. Dashboard → **Schools, Partners & Mentors** → Board of Mentors → **Copy invite link**.
+2. Send that link to the mentor (email/Slack/etc.). Link is token-gated (`mentor-join.html?invite=…`), `noindex`, expires in ~30 days. **Revoke invites** invalidates outstanding links.
+3. Mentor submits: name, email, phone, photo, LinkedIn, affiliation (title + org).
+4. System **automatically**:
+   - Creates an **active** `advisors` row (shows on Board of Mentors)
+   - Creates Auth + `mentor_accounts` (login ready)
+   - Emails username + temporary password + Mentor login link
 
-## Deploy steps
+No manual Activate or Provision for invite signups.
 
-1. Run migration: `supabase/migrations/create_mentor_accounts.sql` in the Supabase SQL editor.
-2. Deploy edge functions:
-   - **`mentors-provision`** (new) — creates Auth user + returns username/password for the exec modal.
-     Redeploy with JWT verification **off** at the gateway (`config.toml` has `verify_jwt = false`, or CLI:
-     `supabase functions deploy mentors-provision --no-verify-jwt`). Otherwise browser OPTIONS preflight fails with CORS.
-     Auth is still checked inside the function (exec only).
-   - **`fetch-legiscan-person-contact`** — allows mentor sessions to pull legislator contact info (demo of the policy flow).
-   - **`outreach-send-email`** — explicitly **rejects** mentor sends (UI already greys the buttons; this is the server backstop).
-3. Ship the frontend (GitHub Pages / usual deploy).
+## Manual Add Mentor (fallback)
 
-## Exec flow
+Exec **Add Mentor** still works. Use **Provision login** / **Reset password** for exec-created mentors without email (synthetic username).
 
-1. Ensure the person is on Board of Mentors (`advisors`).
-2. Click **Provision login**.
-3. Copy username + temp password from the modal; share out of band.
-4. Mentor opens login → **Mentor** → signs in → Policy tools (Research / Outreach).
+## Login
 
-Password resets: **Reset password** on the same row (again shown once in the modal). Mentors cannot use Forgot Password (no email).
+`/login.html?mode=mentor` — username **or** the email they registered with.
+
+Dashboard: Research + Outreach (+ Change password). Send-via-SPAN-email stays disabled for mentors.
+
+## Deploy
+
+1. Migrations: `create_mentor_accounts.sql`, `mentor_accounts_bills_select_rls.sql`, `mentor_session_allow_inactive_advisor.sql`, **`mentor_join_invites.sql`**.
+2. Edge functions (JWT verify off where noted):
+   - `mentors-provision` (`--no-verify-jwt`)
+   - `mentors-invite` (`--no-verify-jwt`)
+   - `mentors-join` (`--no-verify-jwt`) — public submit
+   - `fetch-legiscan-person-contact`, `outreach-send-email` (mentor preview / block send)
+3. Frontend including `mentor-join.html`.
+4. Secrets: `RESEND_API_KEY`; optional `PRODUCTION_URL`, `MENTOR_JOIN_FROM`.

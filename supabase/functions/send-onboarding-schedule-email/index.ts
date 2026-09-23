@@ -60,7 +60,9 @@ function sanitizeSchedulingUrl(raw: string | undefined): string | null {
   }
 }
 
-/** Wide logo (PNG) — hosted on production site for reliable loading in email clients */
+/** Wide logo (PNG) — hosted on production site for reliable loading in email clients.
+ *  Do not use imgbb or other third-party hosts (they expire / 404). Redeploy this
+ *  function after changing the URL. */
 const LOGO_IMG_SRC = "https://spanationwide.org/images/index/logo-wide-dark.png"
 
 function buildOnboardingScheduleEmailHtml(

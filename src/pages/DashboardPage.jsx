@@ -10,7 +10,7 @@ import {
 } from '../lib/proposalPdf'
 import { fetchLegiscanBillBySearch, isLegiscanBillNumberShape } from '../lib/legiscan'
 import { getClassroomSessionRole } from '../lib/classroom'
-import { getMentorSession, provisionMentorLogin, syntheticMemberFromMentorSession } from '../lib/mentors'
+import { getMentorSession, provisionMentorLogin, syntheticMemberFromMentorSession, createMentorInviteLink, revokeMentorInvites } from '../lib/mentors'
 import { isAllowedApplicationStatusTransition } from './dashboard/applications'
 import BillAssignmentsExecPanel from './dashboard/BillAssignmentsExecPanel'
 import {
@@ -406,6 +406,8 @@ function DashboardPage() {
   const [mentorAccountsByAdvisorId, setMentorAccountsByAdvisorId] = useState({})
   const [mentorCredentialsModal, setMentorCredentialsModal] = useState(null)
   const [mentorProvisionBusyId, setMentorProvisionBusyId] = useState(null)
+  const [mentorInviteBusy, setMentorInviteBusy] = useState(false)
+  const [mentorInviteMessage, setMentorInviteMessage] = useState('')
   const [showAdvisorModal, setShowAdvisorModal] = useState(false)
   const [editingAdvisorId, setEditingAdvisorId] = useState(null)
   const [advisorForm, setAdvisorForm] = useState({
@@ -5866,6 +5868,55 @@ function DashboardPage() {
     }
   }
 
+  const handleCopyMentorInviteLink = async () => {
+    setMentorInviteBusy(true)
+    setMentorInviteMessage('')
+    try {
+      const result = await createMentorInviteLink()
+      let url = result.join_url
+      if (!url) throw new Error('No invite URL returned')
+      // Prefer current site origin (local/staging) while keeping the invite token.
+      try {
+        const parsed = new URL(url)
+        url = `${window.location.origin}${parsed.pathname}${parsed.search}`
+      } catch {
+        /* keep server URL */
+      }
+      try {
+        await navigator.clipboard.writeText(url)
+        setMentorInviteMessage(
+          `Invite link copied. Valid until ${
+            result.expires_at
+              ? new Date(result.expires_at).toLocaleDateString(undefined, { dateStyle: 'medium' })
+              : 'the expiry date'
+          }.`
+        )
+      } catch {
+        setMentorInviteMessage(url)
+        window.prompt('Copy this mentor invite link:', url)
+      }
+    } catch (err) {
+      console.error('Mentor invite failed:', err)
+      alert(err.message || 'Failed to create invite link.')
+    } finally {
+      setMentorInviteBusy(false)
+    }
+  }
+
+  const handleRevokeMentorInvites = async () => {
+    if (!window.confirm('Revoke all active mentor invite links? Existing mentors keep their logins.')) return
+    setMentorInviteBusy(true)
+    setMentorInviteMessage('')
+    try {
+      await revokeMentorInvites()
+      setMentorInviteMessage('Active invite links revoked. Create a new link when you need one.')
+    } catch (err) {
+      alert(err.message || 'Failed to revoke invites.')
+    } finally {
+      setMentorInviteBusy(false)
+    }
+  }
+
   const handleAdvisorDragStart = (e, advisorId) => {
     setDraggedAdvisorId(advisorId)
     e.dataTransfer.effectAllowed = 'move'
@@ -6621,8 +6672,8 @@ function DashboardPage() {
             <div className="alert alert-info mb-4">
               <i className="bi bi-info-circle me-2"></i>
               Manage schools and partners on the homepage, and Board of Mentors on the Members page Leadership tab.
-              You can provision mentor logins (username + password) so they can try Research and Outreach without seeing
-              HR, applications, or other member sections.
+              Copy an invite link for mentors to self-register (profile + login created automatically), or add them
+              manually and use Provision login.
             </div>
 
             <div className="row g-4">
@@ -6829,13 +6880,40 @@ function DashboardPage() {
             <div className="row g-4 mt-1">
               <div className="col-12">
                 <div className="card shadow-sm">
-                  <div className="card-header bg-white d-flex justify-content-between align-items-center">
+                  <div className="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <h5 className="mb-0">Board of Mentors</h5>
-                    <button className="btn btn-sm btn-dark" onClick={handleAddAdvisor}>
-                      <i className="bi bi-plus-circle me-1"></i>Add Mentor
-                    </button>
+                    <div className="d-flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-dark"
+                        disabled={mentorInviteBusy}
+                        onClick={handleCopyMentorInviteLink}
+                      >
+                        <i className="bi bi-link-45deg me-1"></i>
+                        {mentorInviteBusy ? 'Working…' : 'Copy invite link'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary"
+                        disabled={mentorInviteBusy}
+                        onClick={handleRevokeMentorInvites}
+                        title="Invalidate outstanding invite links"
+                      >
+                        Revoke invites
+                      </button>
+                      <button className="btn btn-sm btn-dark" onClick={handleAddAdvisor}>
+                        <i className="bi bi-plus-circle me-1"></i>Add Mentor
+                      </button>
+                    </div>
                   </div>
                   <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto', overflowX: 'hidden' }}>
+                    {mentorInviteMessage && (
+                      <div className="alert alert-info py-2 small">{mentorInviteMessage}</div>
+                    )}
+                    <p className="small text-muted mb-3">
+                      Invite link opens a private form (name, email, phone, photo, LinkedIn, affiliation). On submit the
+                      mentor is added to the Board, login is created, and they get a confirmation email with credentials.
+                    </p>
                     {advisors.length > 0 ? (
                       <div className="table-responsive">
                         <table className="table table-hover table-sm mb-0">
@@ -6931,12 +7009,16 @@ function DashboardPage() {
                                       <button
                                         type="button"
                                         className="btn btn-sm btn-dark"
-                                        disabled={mentorProvisionBusyId === advisor.advisor_id || !advisor.active}
+                                        disabled={mentorProvisionBusyId === advisor.advisor_id}
                                         onClick={(e) => {
                                           e.stopPropagation()
                                           handleProvisionMentorLogin(advisor.advisor_id, 'provision')
                                         }}
-                                        title="Create mentor login"
+                                        title={
+                                          advisor.active
+                                            ? 'Create mentor login'
+                                            : 'Create mentor login (mentor is inactive on the public Board)'
+                                        }
                                       >
                                         {mentorProvisionBusyId === advisor.advisor_id ? '…' : 'Provision login'}
                                       </button>

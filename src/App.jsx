@@ -12,6 +12,7 @@ const HomePage = lazy(() => import('./pages/HomePage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ClassroomDashboardPage = lazy(() => import('./pages/ClassroomDashboardPage'))
 const ClassroomJoinPage = lazy(() => import('./pages/ClassroomJoinPage'))
+const MentorJoinPage = lazy(() => import('./pages/MentorJoinPage'))
 const BillsPreview = lazy(() => import('./components/BillsPreview'))
 const BillsStats = lazy(() => import('./components/BillsStats'))
 
@@ -97,6 +98,14 @@ function App({ page }) {
     return (
       <Suspense fallback={<LoadingFallback />}>
         <ClassroomJoinPage />
+      </Suspense>
+    )
+  }
+
+  if (page === 'mentor-join') {
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <MentorJoinPage />
       </Suspense>
     )
   }

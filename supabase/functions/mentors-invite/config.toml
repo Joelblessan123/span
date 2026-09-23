@@ -1,0 +1,2 @@
+# Auth enforced inside (exec check). Gateway JWT breaks OPTIONS/CORS from localhost.
+verify_jwt = false

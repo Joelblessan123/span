@@ -55,12 +55,21 @@ function LoginPage() {
 
     let loginEmail = email.trim()
     if (isMentor) {
-      const username = loginEmail.replace(/@.*$/, '').toLowerCase()
-      if (!username) {
-        setError('Enter your mentor username.')
+      const raw = loginEmail.trim()
+      if (!raw) {
+        setError('Enter your mentor username or email.')
         return
       }
-      loginEmail = `${username}@mentors.spanationwide.org`
+      const { data: resolved, error: resolveError } = await supabase.rpc('resolve_mentor_auth_email', {
+        p_identifier: raw,
+      })
+      if (!resolveError && resolved) {
+        loginEmail = String(resolved).trim().toLowerCase()
+      } else if (raw.includes('@')) {
+        loginEmail = raw.toLowerCase()
+      } else {
+        loginEmail = `${raw.toLowerCase().replace(/@.*$/, '')}@mentors.spanationwide.org`
+      }
     } else if (!isClassroom && !loginEmail.includes('@')) {
       loginEmail += '@spanationwide.org'
     }
@@ -421,7 +430,7 @@ function LoginPage() {
             <form onSubmit={handleEmailLogin}>
               <div className="mb-3">
                 <label htmlFor="email" className="form-label">
-                  {isClassroom ? 'Email' : isMentor ? 'Username' : 'SPAN email'}
+                  {isClassroom ? 'Email' : isMentor ? 'Username or email' : 'SPAN email'}
                 </label>
                 <input
                   type={isClassroom ? 'email' : 'text'}
@@ -431,7 +440,7 @@ function LoginPage() {
                     isClassroom
                       ? 'Your school email'
                       : isMentor
-                        ? 'firstname.lastname.4821'
+                        ? 'firstname.lastname.4821 or you@email.com'
                         : 'name@spanationwide.org'
                   }
                   value={email}
@@ -443,7 +452,9 @@ function LoginPage() {
                   <small className="text-muted">Use your SPAN address, not your personal email</small>
                 )}
                 {isMentor && (
-                  <small className="text-muted">Use the username SPAN shared with you (not an email)</small>
+                  <small className="text-muted">
+                    Use the username from your welcome email, or the email you registered with
+                  </small>
                 )}
               </div>
               <div className="mb-3">

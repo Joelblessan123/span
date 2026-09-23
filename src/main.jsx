@@ -63,6 +63,7 @@ function mountComponents() {
   mountApp(document.getElementById('login-root'), 'login')
   mountApp(document.getElementById('dashboard-root'), 'dashboard')
   mountApp(document.getElementById('classroom-join-root'), 'classroom-join')
+  mountApp(document.getElementById('mentor-join-root'), 'mentor-join')
   mountApp(document.getElementById('classroom-dashboard-root'), 'classroom-dashboard')
   mountApp(document.getElementById('bills-preview-root'), 'bills-preview')
   mountApp(document.getElementById('bills-stats-root'), 'bills-stats')
