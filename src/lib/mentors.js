@@ -89,7 +89,7 @@ export async function provisionMentorLogin(advisorId, action = 'provision') {
   return payload
 }
 
-/** Create or reuse an active mentor invite; returns join_url for execs to copy. */
+/** Mint a new mentor invite; returns join_url for execs to copy. */
 export async function createMentorInviteLink() {
   const { supabaseUrl, anonKey, accessToken } = await authHeaders()
   const resp = await fetch(`${supabaseUrl}/functions/v1/mentors-invite`, {
@@ -108,7 +108,8 @@ export async function createMentorInviteLink() {
   return payload
 }
 
-export async function revokeMentorInvites() {
+/** Active (non-revoked, non-expired) mentor invites. */
+export async function listMentorInvites() {
   const { supabaseUrl, anonKey, accessToken } = await authHeaders()
   const resp = await fetch(`${supabaseUrl}/functions/v1/mentors-invite`, {
     method: 'POST',
@@ -117,13 +118,47 @@ export async function revokeMentorInvites() {
       Authorization: `Bearer ${accessToken}`,
       apikey: anonKey,
     },
-    body: JSON.stringify({ action: 'revoke' }),
+    body: JSON.stringify({ action: 'list' }),
+  })
+  const payload = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(payload.error || payload.details || 'Failed to list mentor invites')
+  }
+  return Array.isArray(payload.invites) ? payload.invites : []
+}
+
+/** Revoke one invite by id, or all active invites when inviteId is omitted. */
+export async function revokeMentorInvites(inviteId = null) {
+  const { supabaseUrl, anonKey, accessToken } = await authHeaders()
+  const body = { action: 'revoke' }
+  if (inviteId) body.invite_id = inviteId
+  const resp = await fetch(`${supabaseUrl}/functions/v1/mentors-invite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify(body),
   })
   const payload = await resp.json().catch(() => ({}))
   if (!resp.ok) {
     throw new Error(payload.error || payload.details || 'Failed to revoke mentor invites')
   }
   return payload
+}
+
+export function localizeInviteUrl(joinUrl) {
+  const raw = String(joinUrl || '').trim()
+  if (!raw || typeof window === 'undefined') return raw
+  try {
+    const u = new URL(raw)
+    u.protocol = window.location.protocol
+    u.host = window.location.host
+    return u.toString()
+  } catch {
+    return raw
+  }
 }
 
 export async function validateMentorInvite(inviteToken) {

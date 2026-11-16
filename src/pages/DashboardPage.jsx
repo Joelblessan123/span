@@ -11,7 +11,15 @@ import {
 } from '../lib/proposalPdf'
 import { fetchLegiscanBillBySearch, isLegiscanBillNumberShape } from '../lib/legiscan'
 import { getClassroomSessionRole } from '../lib/classroom'
-import { getMentorSession, provisionMentorLogin, syntheticMemberFromMentorSession, createMentorInviteLink, revokeMentorInvites } from '../lib/mentors'
+import {
+  getMentorSession,
+  provisionMentorLogin,
+  syntheticMemberFromMentorSession,
+  createMentorInviteLink,
+  listMentorInvites,
+  localizeInviteUrl,
+  revokeMentorInvites,
+} from '../lib/mentors'
 import { isAllowedApplicationStatusTransition } from './dashboard/applications'
 import BillAssignmentsExecPanel from './dashboard/BillAssignmentsExecPanel'
 import {
@@ -414,6 +422,7 @@ function DashboardPage() {
   const [mentorProvisionBusyId, setMentorProvisionBusyId] = useState(null)
   const [mentorInviteBusy, setMentorInviteBusy] = useState(false)
   const [mentorInviteMessage, setMentorInviteMessage] = useState('')
+  const [mentorActiveInvites, setMentorActiveInvites] = useState([])
   const [showAdvisorModal, setShowAdvisorModal] = useState(false)
   const [editingAdvisorId, setEditingAdvisorId] = useState(null)
   const [advisorForm, setAdvisorForm] = useState({
@@ -1035,6 +1044,7 @@ function DashboardPage() {
       map[row.advisor_id] = row
     })
     setMentorAccountsByAdvisorId(map)
+    loadMentorActiveInvites().catch(() => {})
   }
 
   // Load HR reports (executive directors only, filtered to exclude reports about themselves)
@@ -6056,20 +6066,23 @@ function DashboardPage() {
     }
   }
 
+  const loadMentorActiveInvites = async () => {
+    try {
+      const invites = await listMentorInvites()
+      setMentorActiveInvites(invites)
+    } catch (err) {
+      console.warn('mentor invites list', err)
+      setMentorActiveInvites([])
+    }
+  }
+
   const handleCopyMentorInviteLink = async () => {
     setMentorInviteBusy(true)
     setMentorInviteMessage('')
     try {
       const result = await createMentorInviteLink()
-      let url = result.join_url
+      const url = localizeInviteUrl(result.join_url)
       if (!url) throw new Error('No invite URL returned')
-      // Prefer current site origin (local/staging) while keeping the invite token.
-      try {
-        const parsed = new URL(url)
-        url = `${window.location.origin}${parsed.pathname}${parsed.search}`
-      } catch {
-        /* keep server URL */
-      }
       try {
         await navigator.clipboard.writeText(url)
         setMentorInviteMessage(
@@ -6083,9 +6096,42 @@ function DashboardPage() {
         setMentorInviteMessage(url)
         window.prompt('Copy this mentor invite link:', url)
       }
+      await loadMentorActiveInvites()
     } catch (err) {
       console.error('Mentor invite failed:', err)
       alert(err.message || 'Failed to create invite link.')
+    } finally {
+      setMentorInviteBusy(false)
+    }
+  }
+
+  const handleCopyExistingMentorInvite = async (invite) => {
+    const url = localizeInviteUrl(invite.join_url)
+    if (!url) return
+    try {
+      await navigator.clipboard.writeText(url)
+      setMentorInviteMessage(
+        `Invite link copied. Valid until ${
+          invite.expires_at
+            ? new Date(invite.expires_at).toLocaleDateString(undefined, { dateStyle: 'medium' })
+            : 'the expiry date'
+        }.`
+      )
+    } catch {
+      window.prompt('Copy this mentor invite link:', url)
+    }
+  }
+
+  const handleRevokeOneMentorInvite = async (invite) => {
+    if (!window.confirm('Revoke this mentor invite link? Existing mentors keep their logins.')) return
+    setMentorInviteBusy(true)
+    setMentorInviteMessage('')
+    try {
+      await revokeMentorInvites(invite.invite_id)
+      setMentorInviteMessage('Invite revoked.')
+      await loadMentorActiveInvites()
+    } catch (err) {
+      alert(err.message || 'Failed to revoke invite.')
     } finally {
       setMentorInviteBusy(false)
     }
@@ -6098,6 +6144,7 @@ function DashboardPage() {
     try {
       await revokeMentorInvites()
       setMentorInviteMessage('Active invite links revoked. Create a new link when you need one.')
+      await loadMentorActiveInvites()
     } catch (err) {
       alert(err.message || 'Failed to revoke invites.')
     } finally {
@@ -7089,11 +7136,11 @@ function DashboardPage() {
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-secondary"
-                        disabled={mentorInviteBusy}
+                        disabled={mentorInviteBusy || mentorActiveInvites.length === 0}
                         onClick={handleRevokeMentorInvites}
-                        title="Invalidate outstanding invite links"
+                        title="Invalidate all outstanding mentor invite links"
                       >
-                        Revoke invites
+                        Revoke all
                       </button>
                       <button className="btn btn-sm btn-dark" onClick={handleAddAdvisor}>
                         <i className="bi bi-plus-circle me-1"></i>Add Mentor
@@ -7105,9 +7152,68 @@ function DashboardPage() {
                       <div className="alert alert-info py-2 small">{mentorInviteMessage}</div>
                     )}
                     <p className="small text-muted mb-3">
-                      Invite link opens a private form (name, email, phone, photo, LinkedIn, affiliation). On submit the
-                      mentor is added to the Board, login is created, and they get a confirmation email with credentials.
+                      Each “Copy invite link” mints a new link. Mentors open a private form (name, email, phone, photo,
+                      LinkedIn, affiliation); on submit they join the Board, get a login, and receive credentials by
+                      email. Revoke a specific row below, or revoke all.
                     </p>
+                    {mentorActiveInvites.length > 0 && (
+                      <div className="table-responsive mb-3">
+                        <table className="table table-sm align-middle mb-0">
+                          <thead>
+                            <tr>
+                              <th>Created</th>
+                              <th>Expires</th>
+                              <th>Uses</th>
+                              <th className="text-end">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mentorActiveInvites.map((inv) => (
+                              <tr key={inv.invite_id}>
+                                <td className="small">
+                                  {inv.created_at
+                                    ? new Date(inv.created_at).toLocaleDateString(undefined, {
+                                        dateStyle: 'medium',
+                                      })
+                                    : '—'}
+                                </td>
+                                <td className="small">
+                                  {inv.expires_at
+                                    ? new Date(inv.expires_at).toLocaleDateString(undefined, {
+                                        dateStyle: 'medium',
+                                      })
+                                    : '—'}
+                                </td>
+                                <td className="small">{inv.use_count ?? 0}</td>
+                                <td className="text-end">
+                                  <div className="d-inline-flex flex-wrap gap-1 justify-content-end">
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-dark"
+                                      disabled={mentorInviteBusy}
+                                      onClick={() => handleCopyExistingMentorInvite(inv)}
+                                    >
+                                      Copy
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-danger"
+                                      disabled={mentorInviteBusy}
+                                      onClick={() => handleRevokeOneMentorInvite(inv)}
+                                    >
+                                      Revoke
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {mentorActiveInvites.length === 0 && (
+                      <p className="small text-muted mb-3">No active mentor invites right now.</p>
+                    )}
                     {advisors.length > 0 ? (
                       <div className="table-responsive">
                         <table className="table table-hover table-sm mb-0">

@@ -1,16 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  createClassroomInviteLink,
   deactivateSchool,
   fetchAllClasses,
   fetchSchools,
   fetchTeachers,
   insertSchool,
   insertTeacher,
+  listClassroomInvites,
+  localizeClassroomInviteUrl,
   provisionTeacher,
+  revokeClassroomInvite,
   setSchoolActive,
   setTeacherActive,
 } from '../../lib/classroom'
+import SchoolDirectoryPicker from '../../components/SchoolDirectoryPicker'
+import { supabase } from '../../lib/supabase'
 import './ClassroomSection.css'
+
+function formatInviteExpiry(iso) {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
+  } catch {
+    return '—'
+  }
+}
 
 export default function ClassroomSection({ sectionId, sectionOrder }) {
   const [schools, setSchools] = useState([])
@@ -22,7 +37,8 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
   const [showAddSchool, setShowAddSchool] = useState(false)
   const [showAddTeacher, setShowAddTeacher] = useState(false)
   const [provisioningId, setProvisioningId] = useState(null)
-  const [newSchool, setNewSchool] = useState({ name: '', city: '', state: '', contactEmail: '' })
+  const [newSchoolPick, setNewSchoolPick] = useState(null)
+  const [newSchoolContactEmail, setNewSchoolContactEmail] = useState('')
   const [newTeacher, setNewTeacher] = useState({
     schoolId: '',
     firstName: '',
@@ -31,6 +47,11 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
   })
   /** Soft-removed (active=false) schools/teachers stay in DB; hide them from the Directory by default. */
   const [showRemoved, setShowRemoved] = useState(false)
+  const [activeInvites, setActiveInvites] = useState([])
+  const [inviteBusy, setInviteBusy] = useState(false)
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  /** '' = open invite (teacher picks school on form); otherwise pin to school_id */
+  const [inviteSchoolId, setInviteSchoolId] = useState('')
 
   const activeSchools = useMemo(
     () => schools.filter((s) => s.active !== false),
@@ -78,6 +99,16 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
     )
   }, [schools, teachers, classes])
 
+  const loadInvites = useCallback(async () => {
+    try {
+      const invites = await listClassroomInvites()
+      setActiveInvites(invites)
+    } catch (err) {
+      console.warn('classroom invites list', err)
+      setActiveInvites([])
+    }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -90,17 +121,85 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
       setSchools(schoolRows)
       setTeachers(teacherRows)
       setClasses(classRows)
+      await loadInvites()
     } catch (err) {
       console.error(err)
       setError(err.message || 'Failed to load classroom data.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadInvites])
 
   useEffect(() => {
     load()
   }, [load])
+
+  async function copyInviteUrl(joinUrl, expiresAt) {
+    const url = localizeClassroomInviteUrl(joinUrl)
+    try {
+      await navigator.clipboard.writeText(url)
+      setMessage(
+        `Invite link copied. Valid until ${formatInviteExpiry(expiresAt)}.`,
+      )
+    } catch {
+      window.prompt('Copy this Classroom invite link:', url)
+      setMessage(url)
+    }
+  }
+
+  function openInviteModal(preselectedSchoolId = '') {
+    setInviteSchoolId(preselectedSchoolId || '')
+    setShowInviteModal(true)
+  }
+
+  async function handleCreateInviteFromModal(e) {
+    e.preventDefault()
+    setInviteBusy(true)
+    setMessage('')
+    setError('')
+    try {
+      const schoolId = inviteSchoolId || null
+      const schoolLabel = schoolId
+        ? activeSchools.find((s) => s.school_id === schoolId)?.name || null
+        : 'Open teacher invite'
+      if (schoolId && !activeSchools.some((s) => s.school_id === schoolId)) {
+        setError('Select a school from the list, or leave blank for an open invite.')
+        setInviteBusy(false)
+        return
+      }
+
+      const result = await createClassroomInviteLink({
+        schoolId,
+        label: schoolLabel,
+      })
+      setShowInviteModal(false)
+      await copyInviteUrl(result.join_url, result.expires_at)
+      await loadInvites()
+    } catch (err) {
+      setError(err.message || 'Could not create invite link.')
+    } finally {
+      setInviteBusy(false)
+    }
+  }
+
+  async function handleRevokeInvite(invite) {
+    const kindLabel =
+      invite.kind === 'teacher'
+        ? `teacher invite${invite.school_name ? ` (${invite.school_name})` : ''}`
+        : 'school + teacher invite'
+    if (!window.confirm(`Revoke this ${kindLabel}? The link will stop working immediately.`)) return
+    setInviteBusy(true)
+    setError('')
+    try {
+      await revokeClassroomInvite(invite.invite_id)
+      setMessage('Invite revoked.')
+      await loadInvites()
+    } catch (err) {
+      setError(err.message || 'Could not revoke invite.')
+    } finally {
+      setInviteBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (activeSchools.length && !newTeacher.schoolId) {
@@ -125,15 +224,41 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
   async function handleAddSchool(e) {
     e.preventDefault()
     setMessage('')
+    setError('')
+    if (!newSchoolPick?.nces_id || !newSchoolPick?.name) {
+      setError('Select a school from the directory.')
+      return
+    }
     try {
+      const ncesId = String(newSchoolPick.nces_id).trim()
+      const { data: existing } = await supabase
+        .from('classroom_schools')
+        .select('school_id, name, active')
+        .eq('nces_id', ncesId)
+        .maybeSingle()
+      if (existing) {
+        if (existing.active === false) {
+          await setSchoolActive(existing.school_id, true)
+          setMessage(`Reactivated ${existing.name}.`)
+        } else {
+          setMessage(`${existing.name} is already in Classroom.`)
+        }
+        setShowAddSchool(false)
+        setNewSchoolPick(null)
+        setNewSchoolContactEmail('')
+        await load()
+        return
+      }
       await insertSchool({
-        name: newSchool.name.trim(),
-        city: newSchool.city.trim() || null,
-        state: newSchool.state.trim() || null,
-        contact_email: newSchool.contactEmail.trim() || null,
+        nces_id: ncesId,
+        name: newSchoolPick.name.trim(),
+        city: newSchoolPick.city || null,
+        state: newSchoolPick.state || null,
+        contact_email: newSchoolContactEmail.trim() || null,
       })
       setShowAddSchool(false)
-      setNewSchool({ name: '', city: '', state: '', contactEmail: '' })
+      setNewSchoolPick(null)
+      setNewSchoolContactEmail('')
       setMessage('School added.')
       await load()
     } catch (err) {
@@ -275,31 +400,120 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
         <div>
           <h3 className="mb-1">Classroom</h3>
           <p className="text-muted mb-0">
-            Schools → teachers → classes. Adding a teacher creates their login and emails Classroom
-            credentials. Teachers manage classes at{' '}
+            Create teacher invite links pinned to a school (login emailed automatically), or add
+            manually. Teachers manage classes at{' '}
             <a href="/classroom/dashboard.html">classroom/dashboard.html</a>; students join via{' '}
             <a href="/classroom/join.html">classroom/join.html</a>.
           </p>
         </div>
         <div className="d-flex flex-wrap gap-2">
-          <button type="button" className="btn btn-sm btn-dark" onClick={() => setShowAddSchool(true)}>
+          <button
+            type="button"
+            className="btn btn-sm btn-dark"
+            disabled={inviteBusy}
+            onClick={() => openInviteModal()}
+          >
+            <i className="bi bi-link-45deg me-1" />
+            {inviteBusy ? 'Working…' : 'Create teacher invite'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-dark"
+            onClick={() => {
+              setNewSchoolPick(null)
+              setNewSchoolContactEmail('')
+              setShowAddSchool(true)
+            }}
+          >
             <i className="bi bi-plus-circle me-1" />
             Add school
           </button>
           <button
             type="button"
-            className="btn btn-sm btn-outline-dark"
+            className="btn btn-sm btn-outline-secondary"
             onClick={() => openAddTeacher()}
             disabled={activeSchools.length === 0}
           >
             <i className="bi bi-person-plus me-1" />
-            Add teacher
+            Add teacher manually
           </button>
         </div>
       </div>
 
       {error && <div className="alert alert-danger py-2">{error}</div>}
       {message && <div className="alert alert-success py-2 text-break">{message}</div>}
+
+      <div className="card shadow-sm mb-3">
+        <div className="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <h5 className="mb-0">Active invites</h5>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            disabled={inviteBusy || loading}
+            onClick={loadInvites}
+          >
+            Refresh
+          </button>
+        </div>
+        <div className="card-body py-2">
+          <p className="small text-muted mb-2">
+            Open invites: teachers pick an existing Classroom school, or add theirs from the NCES directory
+            (state → city/search → select). Optionally pin a link to one school. Revoke to invalidate a
+            specific link.
+          </p>
+          {activeInvites.length === 0 ? (
+            <p className="small text-muted mb-0">No active invites. Create a teacher invite to get started.</p>
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>School / note</th>
+                    <th>Expires</th>
+                    <th>Uses</th>
+                    <th className="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeInvites.map((inv) => (
+                    <tr key={inv.invite_id}>
+                      <td className="small">
+                        {inv.kind === 'teacher' ? 'Teacher' : inv.kind}
+                      </td>
+                      <td className="small">
+                        {inv.school_name || inv.label || 'Open (teacher picks school)'}
+                      </td>
+                      <td className="small">{formatInviteExpiry(inv.expires_at)}</td>
+                      <td className="small">{inv.use_count ?? 0}</td>
+                      <td className="text-end">
+                        <div className="d-inline-flex flex-wrap gap-1 justify-content-end">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-dark"
+                            disabled={inviteBusy}
+                            onClick={() => copyInviteUrl(inv.join_url, inv.expires_at)}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger"
+                            disabled={inviteBusy}
+                            onClick={() => handleRevokeInvite(inv)}
+                          >
+                            Revoke
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
 
       {loading ? (
         <div className="text-center py-4">
@@ -357,6 +571,16 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
                     <div className="d-flex flex-wrap gap-2 flex-shrink-0">
                       {school.active ? (
                         <>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-dark"
+                            disabled={inviteBusy}
+                            onClick={() => openInviteModal(school.school_id)}
+                            title="Create invite link for a teacher at this school"
+                          >
+                            <i className="bi bi-link-45deg me-1" aria-hidden="true" />
+                            Teacher invite
+                          </button>
                           <button
                             type="button"
                             className="btn btn-sm btn-outline-secondary"
@@ -498,6 +722,64 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
         </div>
       )}
 
+      {showInviteModal && (
+        <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-scrollable">
+            <form className="modal-content" onSubmit={handleCreateInviteFromModal}>
+              <div className="modal-header">
+                <h5 className="modal-title">Create teacher invite</h5>
+                <button type="button" className="btn-close" onClick={() => setShowInviteModal(false)} />
+              </div>
+              <div className="modal-body">
+                <p className="small text-muted">
+                  Leave school blank for an open invite: teachers pick an existing Classroom school or add
+                  theirs from the public school directory. Or pin the link to one school.
+                </p>
+                <div className="mb-2">
+                  <label className="form-label" htmlFor="invite-school-select">
+                    School (optional pin)
+                  </label>
+                  <select
+                    id="invite-school-select"
+                    className="form-select"
+                    value={inviteSchoolId}
+                    onChange={(e) => setInviteSchoolId(e.target.value)}
+                  >
+                    <option value="">
+                      Open — teacher picks a school or adds theirs
+                    </option>
+                    {activeSchools.map((s) => (
+                      <option key={s.school_id} value={s.school_id}>
+                        {s.name}
+                        {s.city || s.state ? ` (${[s.city, s.state].filter(Boolean).join(', ')})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {activeSchools.length === 0 && (
+                    <small className="text-muted d-block mt-1">
+                      No schools in the directory yet — an open invite still works; teachers can add their school
+                      on the join form.
+                    </small>
+                  )}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => setShowInviteModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-dark" disabled={inviteBusy}>
+                  {inviteBusy ? 'Creating…' : 'Create & copy link'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showAddSchool && (
         <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-dialog-scrollable">
@@ -507,48 +789,41 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
                 <button type="button" className="btn-close" onClick={() => setShowAddSchool(false)} />
               </div>
               <div className="modal-body">
-                <div className="mb-2">
-                  <label className="form-label">School name</label>
+                <p className="small text-muted mb-3">
+                  Pick a US public school from the directory (no free-typed names). First load per state
+                  fetches the full regional list.
+                </p>
+                <SchoolDirectoryPicker
+                  idPrefix="add-school"
+                  value={newSchoolPick}
+                  onChange={setNewSchoolPick}
+                />
+                <div className="mt-3">
+                  <label className="form-label" htmlFor="add-school-contact">
+                    Contact email (optional)
+                  </label>
                   <input
-                    className="form-control"
-                    required
-                    value={newSchool.name}
-                    onChange={(e) => setNewSchool({ ...newSchool, name: e.target.value })}
-                  />
-                </div>
-                <div className="row g-2">
-                  <div className="col-6">
-                    <label className="form-label">City</label>
-                    <input
-                      className="form-control"
-                      value={newSchool.city}
-                      onChange={(e) => setNewSchool({ ...newSchool, city: e.target.value })}
-                    />
-                  </div>
-                  <div className="col-6">
-                    <label className="form-label">State</label>
-                    <input
-                      className="form-control"
-                      value={newSchool.state}
-                      onChange={(e) => setNewSchool({ ...newSchool, state: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="mt-2">
-                  <label className="form-label">Contact email</label>
-                  <input
+                    id="add-school-contact"
                     type="email"
                     className="form-control"
-                    value={newSchool.contactEmail}
-                    onChange={(e) => setNewSchool({ ...newSchool, contactEmail: e.target.value })}
+                    value={newSchoolContactEmail}
+                    onChange={(e) => setNewSchoolContactEmail(e.target.value)}
                   />
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-outline-secondary" onClick={() => setShowAddSchool(false)}>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => {
+                    setShowAddSchool(false)
+                    setNewSchoolPick(null)
+                    setNewSchoolContactEmail('')
+                  }}
+                >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-dark">
+                <button type="submit" className="btn btn-dark" disabled={!newSchoolPick?.nces_id}>
                   Save
                 </button>
               </div>

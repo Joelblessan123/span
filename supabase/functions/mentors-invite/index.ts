@@ -26,6 +26,22 @@ function randomToken(bytes = 24): string {
   return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("")
 }
 
+function joinUrlFor(token: string): string {
+  return `${PRODUCTION_URL}/mentor-join.html?invite=${encodeURIComponent(token)}`
+}
+
+function serializeInvite(row: Record<string, unknown>) {
+  return {
+    invite_id: row.invite_id,
+    created_at: row.created_at,
+    expires_at: row.expires_at,
+    use_count: row.use_count ?? 0,
+    last_used_at: row.last_used_at ?? null,
+    created_by: row.created_by ?? null,
+    join_url: joinUrlFor(String(row.token ?? "")),
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
@@ -53,7 +69,7 @@ serve(async (req) => {
       })
     }
 
-    const body = (await req.json()) as { action?: string }
+    const body = (await req.json()) as { action?: string; invite_id?: string }
     const action = String(body.action ?? "create").trim().toLowerCase()
 
     const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -88,68 +104,99 @@ serve(async (req) => {
       })
     }
 
+    const nowIso = new Date().toISOString()
+
+    if (action === "list") {
+      const { data: rows, error } = await admin
+        .from("mentor_invites")
+        .select("invite_id, token, created_at, expires_at, use_count, last_used_at, created_by")
+        .is("revoked_at", null)
+        .gt("expires_at", nowIso)
+        .order("created_at", { ascending: false })
+      if (error) {
+        return new Response(JSON.stringify({ error: "Failed to list invites", details: error.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        })
+      }
+      const invites = (rows || []).map((r) => serializeInvite(r as Record<string, unknown>))
+      return new Response(JSON.stringify({ ok: true, action: "list", invites }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      })
+    }
+
     if (action === "revoke") {
+      const inviteId = String(body.invite_id ?? "").trim()
+      if (inviteId) {
+        const { data: updated, error } = await admin
+          .from("mentor_invites")
+          .update({ revoked_at: nowIso })
+          .eq("invite_id", inviteId)
+          .is("revoked_at", null)
+          .select("invite_id")
+          .maybeSingle()
+        if (error) {
+          return new Response(JSON.stringify({ error: "Failed to revoke invite", details: error.message }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          })
+        }
+        if (!updated) {
+          return new Response(JSON.stringify({ error: "Invite not found or already revoked." }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          })
+        }
+        return new Response(JSON.stringify({ ok: true, action: "revoke", invite_id: inviteId }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        })
+      }
+
+      // Legacy: revoke all active when invite_id omitted
       const { error } = await admin
         .from("mentor_invites")
-        .update({ revoked_at: new Date().toISOString() })
+        .update({ revoked_at: nowIso })
         .is("revoked_at", null)
-        .gt("expires_at", new Date().toISOString())
+        .gt("expires_at", nowIso)
       if (error) {
         return new Response(JSON.stringify({ error: "Failed to revoke invites", details: error.message }), {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         })
       }
-      return new Response(JSON.stringify({ ok: true, action: "revoke" }), {
+      return new Response(JSON.stringify({ ok: true, action: "revoke_all" }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       })
     }
 
-    // create (or return existing non-expired invite)
-    const nowIso = new Date().toISOString()
-    const { data: existing } = await admin
+    // create — always mint a new token so multiple active links can coexist
+    const inviteToken = randomToken(24)
+    const expires = new Date()
+    expires.setDate(expires.getDate() + INVITE_TTL_DAYS)
+    const { data: inserted, error: insErr } = await admin
       .from("mentor_invites")
+      .insert({
+        token: inviteToken,
+        created_by: callerMember.member_id,
+        expires_at: expires.toISOString(),
+      })
       .select("*")
-      .is("revoked_at", null)
-      .gt("expires_at", nowIso)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    let invite = existing
-    if (!invite) {
-      const inviteToken = randomToken(24)
-      const expires = new Date()
-      expires.setDate(expires.getDate() + INVITE_TTL_DAYS)
-      const { data: inserted, error: insErr } = await admin
-        .from("mentor_invites")
-        .insert({
-          token: inviteToken,
-          created_by: callerMember.member_id,
-          expires_at: expires.toISOString(),
-        })
-        .select("*")
-        .single()
-      if (insErr || !inserted) {
-        return new Response(JSON.stringify({ error: "Failed to create invite", details: insErr?.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        })
-      }
-      invite = inserted
+      .single()
+    if (insErr || !inserted) {
+      return new Response(JSON.stringify({ error: "Failed to create invite", details: insErr?.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      })
     }
-
-    const joinUrl = `${PRODUCTION_URL}/mentor-join.html?invite=${encodeURIComponent(invite.token)}`
 
     return new Response(
       JSON.stringify({
         ok: true,
         action: "create",
-        invite_id: invite.invite_id,
-        expires_at: invite.expires_at,
-        join_url: joinUrl,
-        use_count: invite.use_count ?? 0,
+        ...serializeInvite(inserted as Record<string, unknown>),
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     )

@@ -232,6 +232,73 @@ export async function insertSchool(row) {
   return data
 }
 
+/**
+ * Load US public schools for a state from NCES CCD (via edge function).
+ * @param {{ state: string, city?: string, q?: string }} params
+ */
+export async function fetchSchoolDirectory(params) {
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '')
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase URL not configured')
+
+  const state = String(params?.state || '').trim()
+  if (!state) throw new Error('Select a state first')
+
+  const cacheKey = `classroom_school_dir_v1:${state.toLowerCase()}`
+  try {
+    const cached = sessionStorage.getItem(cacheKey)
+    if (cached) {
+      const parsed = JSON.parse(cached)
+      if (parsed?.schools && Array.isArray(parsed.schools) && parsed.at && Date.now() - parsed.at < 6 * 60 * 60 * 1000) {
+        let schools = parsed.schools
+        const cities = parsed.cities || []
+        const city = String(params?.city || '').trim().toLowerCase()
+        const q = String(params?.q || '').trim().toLowerCase()
+        if (city) schools = schools.filter((s) => (s.city || '').toLowerCase() === city)
+        if (q) schools = schools.filter((s) => s.name.toLowerCase().includes(q))
+        return { ok: true, state: parsed.state, cities, schools, count: schools.length, cached: true }
+      }
+    }
+  } catch {
+    /* ignore cache errors */
+  }
+
+  const resp = await fetch(`${supabaseUrl}/functions/v1/classroom-school-directory`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${anonKey}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ state }),
+  })
+  const payload = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(payload.error || payload.details || 'Failed to load school directory')
+  }
+
+  try {
+    sessionStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        at: Date.now(),
+        state: payload.state,
+        cities: payload.cities || [],
+        schools: payload.schools || [],
+      }),
+    )
+  } catch {
+    /* quota / private mode */
+  }
+
+  let schools = Array.isArray(payload.schools) ? payload.schools : []
+  const city = String(params?.city || '').trim().toLowerCase()
+  const q = String(params?.q || '').trim().toLowerCase()
+  if (city) schools = schools.filter((s) => (s.city || '').toLowerCase() === city)
+  if (q) schools = schools.filter((s) => s.name.toLowerCase().includes(q))
+  return { ...payload, schools, count: schools.length }
+}
+
 export async function insertTeacher(row) {
   const { data, error } = await supabase.from('classroom_teachers').insert(row).select().single()
   if (error) throw error
@@ -277,6 +344,127 @@ export async function deactivateSchool(schoolId) {
     .eq('school_id', schoolId)
   if (error) throw error
   return school
+}
+
+async function classroomInviteAuthHeaders() {
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+  if (sessionError || !session?.access_token) throw new Error('Not signed in')
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '')
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase URL not configured')
+  return { supabaseUrl, anonKey, accessToken: session.access_token }
+}
+
+/** Mint classroom invite link. Pass schoolId to pin; omit for open invite (school dropdown on form). */
+export async function createClassroomInviteLink({ schoolId = null, label = null } = {}) {
+  const { supabaseUrl, anonKey, accessToken } = await classroomInviteAuthHeaders()
+  const body = { action: 'create', kind: schoolId ? 'teacher' : 'school_and_teacher' }
+  if (schoolId) body.school_id = schoolId
+  if (label) body.label = label
+  const resp = await fetch(`${supabaseUrl}/functions/v1/classroom-invites`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify(body),
+  })
+  const payload = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    const detail = [payload.error, payload.details].filter(Boolean).join(': ')
+    throw new Error(detail || 'Failed to create classroom invite')
+  }
+  return payload
+}
+
+export async function listClassroomInvites() {
+  const { supabaseUrl, anonKey, accessToken } = await classroomInviteAuthHeaders()
+  const resp = await fetch(`${supabaseUrl}/functions/v1/classroom-invites`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ action: 'list' }),
+  })
+  const payload = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(payload.error || payload.details || 'Failed to list classroom invites')
+  }
+  return Array.isArray(payload.invites) ? payload.invites : []
+}
+
+export async function revokeClassroomInvite(inviteId) {
+  const { supabaseUrl, anonKey, accessToken } = await classroomInviteAuthHeaders()
+  const resp = await fetch(`${supabaseUrl}/functions/v1/classroom-invites`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ action: 'revoke', invite_id: inviteId }),
+  })
+  const payload = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(payload.error || payload.details || 'Failed to revoke classroom invite')
+  }
+  return payload
+}
+
+export async function validateClassroomInvite(inviteToken) {
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '')
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase URL not configured')
+  const resp = await fetch(`${supabaseUrl}/functions/v1/classroom-invite-join`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${anonKey}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ action: 'validate', invite: inviteToken }),
+  })
+  const payload = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(payload.error || payload.details || 'Invalid invite')
+  }
+  return payload
+}
+
+export async function submitClassroomInviteJoin(payload) {
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '')
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase URL not configured')
+  const resp = await fetch(`${supabaseUrl}/functions/v1/classroom-invite-join`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${anonKey}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ action: 'submit', ...payload }),
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(data.error || data.details || 'Failed to complete Classroom signup')
+  }
+  return data
+}
+
+export function localizeClassroomInviteUrl(joinUrl) {
+  const raw = String(joinUrl || '').trim()
+  if (!raw || typeof window === 'undefined') return raw
+  try {
+    const u = new URL(raw)
+    u.protocol = window.location.protocol
+    u.host = window.location.host
+    return u.toString()
+  } catch {
+    return raw
+  }
 }
 
 /** Exec: create auth user if needed, link teacher, email Classroom login. */
