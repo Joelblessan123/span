@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   CLASSROOM_FEATURE_LABELS,
@@ -11,6 +11,13 @@ import {
   fetchClassRoster,
   fetchStudentEnrollments,
   fetchTeacherClasses,
+  fetchTeachers,
+  fetchSchools,
+  fetchAllClasses,
+  fetchSpanMaterials,
+  createSpanMaterial,
+  deactivateSpanMaterial,
+  isSpanExec,
   getClassroomSessionRole,
   getSubmissionFileUrl,
   gradeSubmission,
@@ -88,6 +95,409 @@ function FeatureToggles({ features, onChange }) {
   )
 }
 
+/** SPAN-curated materials (read-only for teachers & students). */
+function SpanLibraryList() {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        setItems(await fetchSpanMaterials())
+      } catch (err) {
+        setError(err.message || 'Could not load SPAN materials.')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [])
+
+  return (
+    <div className="card shadow-sm mt-4">
+      <div className="card-header bg-white">
+        <h5 className="mb-0">SPAN materials</h5>
+        <small className="text-muted">Shared by SPAN for every Classroom class.</small>
+      </div>
+      <div className="card-body">
+        {error && <div className="alert alert-danger py-2">{error}</div>}
+        {loading ? (
+          <div className="spinner-border spinner-border-sm text-secondary" role="status" />
+        ) : items.length === 0 ? (
+          <p className="text-muted mb-0">No SPAN materials yet.</p>
+        ) : (
+          <ul className="list-unstyled mb-0">
+            {items.map((m) => (
+              <li key={m.material_id} className="border-bottom py-2">
+                <div className="fw-semibold">{m.title}</div>
+                {m.description && <div className="small text-muted">{m.description}</div>}
+                <div className="small">
+                  {m.file_path && (
+                    <SubmissionFileLink filePath={m.file_path} fileName={m.file_name} />
+                  )}
+                  {m.link_url && (
+                    <a href={m.link_url} target="_blank" rel="noopener noreferrer">
+                      <i className="bi bi-box-arrow-up-right me-1" />
+                      Open link
+                    </a>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function toggleId(list, id) {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id]
+}
+
+/** Exec: manage SPAN library items (add file/link, choose audience, soft-remove). */
+function SpanLibraryManager() {
+  const [items, setItems] = useState([])
+  const [schools, setSchools] = useState([])
+  const [classes, setClasses] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [form, setForm] = useState({ title: '', description: '', linkUrl: '' })
+  const [audience, setAudience] = useState('all')
+  const [schoolIds, setSchoolIds] = useState([])
+  const [classIds, setClassIds] = useState([])
+  const [file, setFile] = useState(null)
+  const [fileInputKey, setFileInputKey] = useState(0)
+
+  const load = useCallback(async () => {
+    setItems(await fetchSpanMaterials())
+  }, [])
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const [materials, schoolRows, classRows] = await Promise.all([
+          fetchSpanMaterials(),
+          fetchSchools(),
+          fetchAllClasses(),
+        ])
+        setItems(materials)
+        setSchools(schoolRows.filter((s) => s.active !== false))
+        setClasses(classRows.filter((c) => !c.archived && !c.classroom_teachers?.is_test))
+      } catch (err) {
+        setError(err.message || 'Could not load SPAN materials.')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [])
+
+  const schoolById = useMemo(() => new Map(schools.map((s) => [s.school_id, s])), [schools])
+  const classById = useMemo(() => new Map(classes.map((c) => [c.class_id, c])), [classes])
+
+  function audienceLabel(m) {
+    const targets = m.classroom_span_material_targets || []
+    if (m.audience === 'schools') {
+      const names = targets
+        .map((t) => schoolById.get(t.school_id)?.name)
+        .filter(Boolean)
+      return `Schools: ${names.join(', ') || '—'}`
+    }
+    if (m.audience === 'classes') {
+      const names = targets
+        .map((t) => classById.get(t.class_id)?.name)
+        .filter(Boolean)
+      return `Classes: ${names.join(', ') || '—'}`
+    }
+    return 'All teachers & students'
+  }
+
+  async function handleAdd(e) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      await createSpanMaterial({
+        title: form.title,
+        description: form.description,
+        linkUrl: form.linkUrl,
+        file,
+        audience,
+        schoolIds,
+        classIds,
+      })
+      setForm({ title: '', description: '', linkUrl: '' })
+      setAudience('all')
+      setSchoolIds([])
+      setClassIds([])
+      setFile(null)
+      setFileInputKey((k) => k + 1)
+      setMessage('Added to SPAN materials.')
+      await load()
+    } catch (err) {
+      setError(err.message || 'Could not add material.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRemove(item) {
+    if (!window.confirm(`Remove “${item.title}” from SPAN materials for all classes?`)) return
+    setError('')
+    setMessage('')
+    try {
+      await deactivateSpanMaterial(item.material_id)
+      setMessage('Removed.')
+      await load()
+    } catch (err) {
+      setError(err.message || 'Could not remove material.')
+    }
+  }
+
+  return (
+    <div className="card shadow-sm">
+      <div className="card-header bg-white">
+        <h5 className="mb-0">SPAN materials</h5>
+        <small className="text-muted">
+          Added here, they appear for every teacher and student in SPAN Classroom.
+        </small>
+      </div>
+      <div className="card-body">
+        {error && <div className="alert alert-danger py-2">{error}</div>}
+        {message && <div className="alert alert-success py-2">{message}</div>}
+
+        <form className="border rounded p-3 mb-3 bg-light" onSubmit={handleAdd}>
+          <div className="mb-2">
+            <label className="form-label" htmlFor="span-mat-title">Title</label>
+            <input
+              id="span-mat-title"
+              className="form-control"
+              required
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+          </div>
+          <div className="mb-2">
+            <label className="form-label" htmlFor="span-mat-desc">Description (optional)</label>
+            <input
+              id="span-mat-desc"
+              className="form-control"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </div>
+          <fieldset className="mb-2">
+            <legend className="form-label fs-6 mb-1">Who sees it</legend>
+            <div className="d-flex flex-wrap gap-3 mb-2">
+              {[
+                { value: 'all', label: 'Everyone' },
+                { value: 'schools', label: 'Specific schools' },
+                { value: 'classes', label: 'Specific classes' },
+              ].map((opt) => (
+                <div className="form-check" key={opt.value}>
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="span-mat-audience"
+                    id={`span-mat-aud-${opt.value}`}
+                    checked={audience === opt.value}
+                    onChange={() => setAudience(opt.value)}
+                  />
+                  <label className="form-check-label" htmlFor={`span-mat-aud-${opt.value}`}>
+                    {opt.label}
+                  </label>
+                </div>
+              ))}
+            </div>
+
+            {audience === 'schools' && (
+              <div className="border rounded bg-white p-2 classroom-scroll" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                {schools.length === 0 ? (
+                  <div className="small text-muted">No active schools yet.</div>
+                ) : (
+                  schools.map((s) => (
+                    <div className="form-check" key={s.school_id}>
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`span-mat-school-${s.school_id}`}
+                        checked={schoolIds.includes(s.school_id)}
+                        onChange={() => setSchoolIds((prev) => toggleId(prev, s.school_id))}
+                      />
+                      <label className="form-check-label" htmlFor={`span-mat-school-${s.school_id}`}>
+                        {s.name}
+                        {s.city || s.state ? (
+                          <span className="text-muted small"> · {[s.city, s.state].filter(Boolean).join(', ')}</span>
+                        ) : null}
+                      </label>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {audience === 'classes' && (
+              <div className="border rounded bg-white p-2 classroom-scroll" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                {classes.length === 0 ? (
+                  <div className="small text-muted">No active classes yet.</div>
+                ) : (
+                  classes.map((c) => (
+                    <div className="form-check" key={c.class_id}>
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`span-mat-class-${c.class_id}`}
+                        checked={classIds.includes(c.class_id)}
+                        onChange={() => setClassIds((prev) => toggleId(prev, c.class_id))}
+                      />
+                      <label className="form-check-label" htmlFor={`span-mat-class-${c.class_id}`}>
+                        {c.name}
+                        <span className="text-muted small">
+                          {' '}· {c.classroom_schools?.name || 'No school'} · {c.classroom_teachers
+                            ? `${c.classroom_teachers.first_name} ${c.classroom_teachers.last_name}`
+                            : 'No teacher'}
+                        </span>
+                      </label>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </fieldset>
+
+          <div className="row g-2 mb-2">
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="span-mat-file">File</label>
+              <input
+                key={fileInputKey}
+                id="span-mat-file"
+                type="file"
+                className="form-control"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="span-mat-link">Or link (https://)</label>
+              <input
+                id="span-mat-link"
+                type="url"
+                className="form-control"
+                placeholder="https://spanationwide.org/…"
+                value={form.linkUrl}
+                onChange={(e) => setForm({ ...form, linkUrl: e.target.value })}
+              />
+            </div>
+          </div>
+          <button type="submit" className="btn btn-dark btn-sm" disabled={busy}>
+            {busy ? 'Adding…' : 'Add to SPAN materials'}
+          </button>
+        </form>
+
+        {loading ? (
+          <div className="spinner-border spinner-border-sm text-secondary" role="status" />
+        ) : items.length === 0 ? (
+          <p className="text-muted mb-0">No SPAN materials yet.</p>
+        ) : (
+          <ul className="list-unstyled mb-0">
+            {items.map((m) => (
+              <li key={m.material_id} className="d-flex justify-content-between align-items-start border-bottom py-2 gap-2">
+                <div className="min-w-0">
+                  <div className="fw-semibold">{m.title}</div>
+                  {m.description && <div className="small text-muted">{m.description}</div>}
+                  <div className="small text-muted">{audienceLabel(m)}</div>
+                  <div className="small">
+                    {m.file_path && <SubmissionFileLink filePath={m.file_path} fileName={m.file_name} />}
+                    {m.link_url && (
+                      <a href={m.link_url} target="_blank" rel="noopener noreferrer">
+                        <i className="bi bi-box-arrow-up-right me-1" />
+                        Open link
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-danger flex-shrink-0"
+                  onClick={() => handleRemove(m)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Exec landing: teachers to view-as + SPAN library manager. */
+function ExecClassroomConsole() {
+  const [teachers, setTeachers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const rows = await fetchTeachers()
+        setTeachers(rows.filter((t) => t.active !== false && !t.is_test))
+      } catch (err) {
+        setError(err.message || 'Could not load teachers.')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [])
+
+  return (
+    <>
+      {error && <div className="alert alert-danger">{error}</div>}
+      <div className="row g-4">
+        <div className="col-lg-5">
+          <div className="card shadow-sm">
+            <div className="card-header bg-white">
+              <h5 className="mb-0">Teacher workspaces</h5>
+              <small className="text-muted">Open a teacher’s classes and assignments as them.</small>
+            </div>
+            <div className="list-group list-group-flush classroom-scroll">
+              {loading ? (
+                <div className="p-3">
+                  <div className="spinner-border spinner-border-sm text-secondary" role="status" />
+                </div>
+              ) : teachers.length === 0 ? (
+                <div className="p-3 text-muted small">No active teachers yet. Add one from the dashboard Classroom section.</div>
+              ) : (
+                teachers.map((t) => (
+                  <a
+                    key={t.teacher_id}
+                    href={`/classroom/dashboard.html?viewAsTeacher=${encodeURIComponent(t.teacher_id)}`}
+                    className="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                  >
+                    <span>
+                      <strong>{t.first_name} {t.last_name}</strong>
+                      <span className="d-block small text-muted">
+                        {t.classroom_schools?.name || 'No school'} · {t.email}
+                      </span>
+                    </span>
+                    <span className="btn btn-sm btn-outline-dark">View as</span>
+                  </a>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="col-lg-7">
+          <SpanLibraryManager />
+        </div>
+      </div>
+    </>
+  )
+}
+
 function SubmissionFileLink({ filePath, fileName }) {
   const [url, setUrl] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -148,7 +558,7 @@ function TeacherDashboard({ profile }) {
   const selectedClass = classes.find((c) => c.class_id === selectedClassId) || classes[0]
 
   const loadClasses = useCallback(async () => {
-    const rows = await fetchTeacherClasses()
+    const rows = await fetchTeacherClasses(profile.teacher_id)
     setClasses(rows)
     if (rows.length && !rows.some((c) => c.class_id === selectedClassId)) {
       setSelectedClassId(rows[0].class_id)
@@ -346,23 +756,36 @@ function TeacherDashboard({ profile }) {
     <>
       {error && <div className="alert alert-danger">{error}</div>}
       {message && <div className="alert alert-success py-2">{message}</div>}
-      <p className="text-muted">
-        Signed in as <strong>{profile.first_name} {profile.last_name}</strong> ({profile.email})
-      </p>
+      {profile.execView ? (
+        <div className="alert alert-warning py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <span>
+            Exec view: working in <strong>{profile.first_name} {profile.last_name}</strong>’s workspace.
+          </span>
+          <a href="/classroom/dashboard.html" className="btn btn-sm btn-outline-dark">
+            Back to exec console
+          </a>
+        </div>
+      ) : (
+        <p className="text-muted">
+          Signed in as <strong>{profile.first_name} {profile.last_name}</strong> ({profile.email})
+        </p>
+      )}
 
       <div className="row g-4">
         <div className="col-lg-4">
           <div className="card shadow-sm">
             <div className="card-header bg-white d-flex justify-content-between align-items-center">
-              <h5 className="mb-0">My classes</h5>
-              <button
-                type="button"
-                className="btn btn-sm btn-dark"
-                onClick={() => setShowNewClass(true)}
-                aria-label="Create class"
-              >
-                <i className="bi bi-plus-lg" aria-hidden="true" />
-              </button>
+              <h5 className="mb-0">{profile.execView ? 'Classes' : 'My classes'}</h5>
+              {!profile.execView && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-dark"
+                  onClick={() => setShowNewClass(true)}
+                  aria-label="Create class"
+                >
+                  <i className="bi bi-plus-lg" aria-hidden="true" />
+                </button>
+              )}
             </div>
             <div className="list-group list-group-flush classroom-scroll">
               {classes.length === 0 ? (
@@ -802,6 +1225,8 @@ function TeacherDashboard({ profile }) {
           </div>
         </div>
       )}
+
+      <SpanLibraryList />
     </>
   )
 }
@@ -1168,6 +1593,8 @@ function StudentDashboard({ profile }) {
         </div>
       )}
 
+      <SpanLibraryList />
+
       <div className="classroom-tools mt-2">
         {features.legiscan && <ClassroomLegiscanPanel />}
         {features.policy_toolkit && <ClassroomPolicyToolkit />}
@@ -1190,9 +1617,35 @@ export default function ClassroomDashboardPage() {
           return
         }
         const role = await getClassroomSessionRole()
+        const exec = await isSpanExec()
+        const viewAsTeacherId = new URLSearchParams(window.location.search).get('viewAsTeacher')
+
+        // Exec "View as": open a teacher's workspace (RLS grants execs access to their classes).
+        if (exec && viewAsTeacherId) {
+          const teachers = await fetchTeachers()
+          const target = teachers.find((t) => t.teacher_id === viewAsTeacherId)
+          if (!target) {
+            setError('That teacher was not found.')
+            return
+          }
+          setRoleInfo({
+            role: 'teacher',
+            execView: true,
+            teacher_id: target.teacher_id,
+            first_name: target.first_name,
+            last_name: target.last_name,
+            email: target.email,
+            school_id: target.school_id,
+          })
+          return
+        }
+
         if (!role?.role) {
+          if (exec) {
+            setRoleInfo({ role: 'exec' })
+            return
+          }
           setError('No classroom account linked to this login. Ask an exec to link your teacher record, or join as a student.')
-          setLoading(false)
           return
         }
         setRoleInfo(role)
@@ -1233,8 +1686,10 @@ export default function ClassroomDashboardPage() {
           </div>
         ) : error ? (
           <div className="alert alert-warning">{error}</div>
-        ) : roleInfo.role === 'teacher' ? (
-          <TeacherDashboard profile={roleInfo} />
+        ) : roleInfo?.role === 'exec' ? (
+          <ExecClassroomConsole />
+        ) : roleInfo?.role === 'teacher' ? (
+          <TeacherDashboard key={roleInfo.teacher_id} profile={roleInfo} />
         ) : (
           <StudentDashboard profile={roleInfo} />
         )}

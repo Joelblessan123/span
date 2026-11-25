@@ -171,20 +171,128 @@ export async function fetchTeachers() {
 export async function fetchAllClasses() {
   const { data, error } = await supabase
     .from('classroom_classes')
-    .select('*, classroom_teachers(first_name, last_name, email), classroom_schools(name)')
+    .select('*, classroom_teachers(first_name, last_name, email, is_test), classroom_schools(name)')
     .order('created_at', { ascending: false })
   if (error) throw error
   return data || []
 }
 
-export async function fetchTeacherClasses() {
-  const { data, error } = await supabase
+/** Classes for a teacher. Pass teacherId when an exec is viewing a teacher's workspace. */
+export async function fetchTeacherClasses(teacherId = null) {
+  let query = supabase
     .from('classroom_classes')
     .select('*')
     .eq('archived', false)
     .order('created_at', { ascending: false })
+  if (teacherId) query = query.eq('teacher_id', teacherId)
+  const { data, error } = await query
   if (error) throw error
   return data || []
+}
+
+/** True when the signed-in user is a SPAN exec (RLS-level admin for Classroom). */
+export async function isSpanExec() {
+  const { data, error } = await supabase.rpc('is_span_exec')
+  if (error) return false
+  return data === true
+}
+
+export async function fetchSpanMaterials({ includeInactive = false } = {}) {
+  let query = supabase
+    .from('classroom_span_materials')
+    .select('*, classroom_span_material_targets(school_id, class_id)')
+    .order('created_at', { ascending: false })
+  if (!includeInactive) query = query.eq('active', true)
+  const { data, error } = await query
+  if (error) throw error
+  return data || []
+}
+
+/**
+ * Exec: add a SPAN library item. Provide a file, a link, or both.
+ * audience: 'all' | 'schools' (schoolIds) | 'classes' (classIds)
+ */
+export async function createSpanMaterial({
+  title,
+  description = '',
+  file = null,
+  linkUrl = '',
+  audience = 'all',
+  schoolIds = [],
+  classIds = [],
+}) {
+  const cleanTitle = String(title || '').trim()
+  if (!cleanTitle) throw new Error('Give the material a title.')
+  const cleanLink = String(linkUrl || '').trim()
+  if (cleanLink && !/^https?:\/\//i.test(cleanLink)) {
+    throw new Error('Link must start with http:// or https://')
+  }
+  if (!file && !cleanLink) throw new Error('Attach a file or add a link.')
+  if (file && file.size > MAX_SUBMISSION_BYTES) {
+    throw new Error('File must be 10 MB or smaller')
+  }
+  if (audience === 'schools' && !schoolIds.length) throw new Error('Pick at least one school.')
+  if (audience === 'classes' && !classIds.length) throw new Error('Pick at least one class.')
+  if (!['all', 'schools', 'classes'].includes(audience)) throw new Error('Invalid audience.')
+
+  const { data: userData } = await supabase.auth.getUser()
+  let filePath = null
+  let fileName = null
+  if (file) {
+    const path = `span-library/${Date.now()}_${Math.random().toString(36).slice(2, 8)}/${sanitizeFileName(file.name)}`
+    const { error: uploadErr } = await supabase.storage.from(SUBMISSION_BUCKET).upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || undefined,
+    })
+    if (uploadErr) throw uploadErr
+    filePath = path
+    fileName = file.name
+  }
+
+  const { data, error } = await supabase
+    .from('classroom_span_materials')
+    .insert({
+      title: cleanTitle,
+      description: String(description || '').trim() || null,
+      file_path: filePath,
+      file_name: fileName,
+      link_url: cleanLink || null,
+      audience,
+      created_by: userData?.user?.id || null,
+    })
+    .select()
+    .single()
+  if (error) {
+    if (filePath) await supabase.storage.from(SUBMISSION_BUCKET).remove([filePath])
+    throw error
+  }
+
+  const targetRows =
+    audience === 'schools'
+      ? [...new Set(schoolIds)].map((school_id) => ({ material_id: data.material_id, school_id }))
+      : audience === 'classes'
+        ? [...new Set(classIds)].map((class_id) => ({ material_id: data.material_id, class_id }))
+        : []
+  if (targetRows.length) {
+    const { error: targetErr } = await supabase.from('classroom_span_material_targets').insert(targetRows)
+    if (targetErr) {
+      // Roll back so a half-targeted item never goes live.
+      await supabase.from('classroom_span_materials').delete().eq('material_id', data.material_id)
+      if (filePath) await supabase.storage.from(SUBMISSION_BUCKET).remove([filePath])
+      throw targetErr
+    }
+  }
+  return data
+}
+
+/** Exec: soft-remove a SPAN library item (keeps the file for audit). */
+export async function deactivateSpanMaterial(materialId) {
+  const { error } = await supabase
+    .from('classroom_span_materials')
+    .update({ active: false })
+    .eq('material_id', materialId)
+  if (error) throw error
 }
 
 export async function fetchClassRoster(classId) {

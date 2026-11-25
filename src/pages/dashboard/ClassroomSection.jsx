@@ -47,6 +47,9 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
   })
   /** Soft-removed (active=false) schools/teachers stay in DB; hide them from the Directory by default. */
   const [showRemoved, setShowRemoved] = useState(false)
+  /** Test teacher accounts (classroom_teachers.is_test) stay hidden unless toggled on. */
+  const [showTest, setShowTest] = useState(false)
+  const testTeacherCount = useMemo(() => teachers.filter((t) => t.is_test).length, [teachers])
   const [activeInvites, setActiveInvites] = useState([])
   const [inviteBusy, setInviteBusy] = useState(false)
   const [showInviteModal, setShowInviteModal] = useState(false)
@@ -83,13 +86,15 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
       const schoolTeachers = (showRemoved
         ? rawTeachers
         : rawTeachers.filter((t) => t.active !== false)
-      ).map((teacher) => ({
-        ...teacher,
-        classes: classesByTeacher.get(teacher.teacher_id) || [],
-      }))
+      )
+        .filter((t) => showTest || !t.is_test)
+        .map((teacher) => ({
+          ...teacher,
+          classes: classesByTeacher.get(teacher.teacher_id) || [],
+        }))
       return { ...school, teachers: schoolTeachers }
     })
-  }, [schools, teachers, classes, showRemoved, activeSchools])
+  }, [schools, teachers, classes, showRemoved, showTest, activeSchools])
 
   const orphanClasses = useMemo(() => {
     const teacherIds = new Set(teachers.map((t) => t.teacher_id))
@@ -428,6 +433,16 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
             <i className="bi bi-plus-circle me-1" />
             Add school
           </button>
+          <a
+            href="/classroom/dashboard.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-sm btn-outline-dark"
+            title="Exec console: SPAN materials for all classes and teacher workspaces"
+          >
+            <i className="bi bi-collection me-1" aria-hidden="true" />
+            SPAN materials
+          </a>
           <button
             type="button"
             className="btn btn-sm btn-outline-secondary"
@@ -538,6 +553,20 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
                   </label>
                 </div>
               )}
+              {testTeacherCount > 0 && (
+                <div className="form-check mb-0">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="classroom-show-test"
+                    checked={showTest}
+                    onChange={(e) => setShowTest(e.target.checked)}
+                  />
+                  <label className="form-check-label small" htmlFor="classroom-show-test">
+                    Show test accounts ({testTeacherCount})
+                  </label>
+                </div>
+              )}
               <span className="small text-muted">
                 {activeSchools.length} school{activeSchools.length === 1 ? '' : 's'} ·{' '}
                 {activeTeachers.length} teacher{activeTeachers.length === 1 ? '' : 's'} ·{' '}
@@ -634,6 +663,16 @@ export default function ClassroomSection({ sectionId, sectionOrder }) {
                           <div className="d-flex flex-wrap gap-2 flex-shrink-0">
                             {teacher.active ? (
                               <>
+                                <a
+                                  href={`/classroom/dashboard.html?viewAsTeacher=${encodeURIComponent(teacher.teacher_id)}`}
+                                  className="btn btn-sm btn-outline-dark"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Open this teacher's classes and materials in SPAN Classroom"
+                                >
+                                  <i className="bi bi-box-arrow-up-right me-1" aria-hidden="true" />
+                                  View as
+                                </a>
                                 {!teacher.user_id && (
                                   <button
                                     type="button"
